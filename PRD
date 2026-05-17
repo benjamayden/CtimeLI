@@ -1,0 +1,277 @@
+# Nebulaos — PRD
+
+### v0.1 MVP
+
+-----
+
+## 1. The problem
+
+ADHD creative brains don’t struggle with ideas. They struggle with the avoided thing sitting in the corner of every tab, every morning, every week. The copy that needs writing. The spec that needs finishing. The task with no clear edges that feels too big to start and too vague to finish.
+
+That’s Nebulaos: nebulous chaos. The enemy.
+
+The fix isn’t another productivity app. It’s presence. A thinking partner sitting next to you who keeps you company, notices when you’ve wandered off, and helps you find your way back. No judgment. No taking over. Just someone who’s there.
+
+**Success looks like this:**
+
+- Task gets done in the session
+- Output is ready for feedback, no sloppy mistakes, no gold-plating
+- The hour felt productive, not punishing
+- You’d open it again for the next avoided thing
+- Time on task is measurably higher than going it alone
+
+-----
+
+## 2. Who it’s for
+
+One person right now. An ADHD creative who:
+
+- Goes time-blind. An hour disappears and they can’t account for it.
+- Avoids discomfort. When something feels hard or fuzzy, dopamine wins. Twitter opens. Slack gets checked.
+- Runs 3 things at once mentally. Committing to one thing feels like losing the other 2.
+- Does better when someone else is in the room. The body-double effect is real.
+- Hates being managed. Shame makes it worse. Warmth makes it better.
+
+The session outcome they’re after:
+
+> “The thing I was putting off is done. No sloppy mistakes. Ready for feedback. Scope felt manageable because I just started and kept going.”
+
+-----
+
+## 3. What Nebulaos does (and doesn’t do)
+
+Nebulaos listens, watches, and talks. That’s it.
+
+It can’t edit your doc. Can’t open apps. Can’t search the web for you. Read-only access to context, zero agency over your work.
+
+Think of it like a colleague sitting next to you. They see your screen. They hear you thinking aloud. They notice when you’ve been on the wrong tab for 10 minutes. They ask “still on the copy?” They don’t fix it for you.
+
+**Non-goals for MVP:**
+
+- No editing, opening, or acting on any file or app
+- No raw audio stored past the current session
+- No cloud required (cloud LLM is fallback only)
+- No teams, shared sessions, or multi-user anything
+- No integrations with calendars, task managers, or project tools
+- macOS only
+- No model fine-tuning (learning happens via RAG and post-session reflection)
+- No GUI. Terminal first. UI comes later when the core loop is proven.
+
+-----
+
+## 4. User stories
+
+### Story 1 — Starting a session
+
+*As an ADHD creative, I want to tell Nebulaos what I’m working on verbally so it understands the goal before we start.*
+
+- Session starts with voice, no form filling
+- Nebulaos confirms it understood and asks at most 2 follow-up questions
+- User names relevant workspaces verbally (“this Figma, this doc”)
+- RAG context loads silently in the background
+- We’re going within 3 minutes of opening the terminal
+
+### Story 2 — Thinking out loud
+
+*As an ADHD creative, I want to think aloud and have Nebulaos respond naturally so the task feels less lonely.*
+
+- Nebulaos listens the whole time, responds when it’s actually useful
+- Silence is fine. Nebulaos doesn’t fill it.
+- Conversational tone, not assistant tone
+- Picks up on half-finished thoughts and frustration without needing a formal question
+- Never touches your work
+
+### Story 3 — Catching drift
+
+*As an ADHD creative, I want Nebulaos to notice when I’ve wandered off so I don’t lose 20 minutes without realising.*
+
+- Screenshot on every app/tab focus change, plus every 5 minutes as a heartbeat
+- Off-workspace activity gets a soft verbal check-in, not an alarm
+- Phrased like curiosity: “still on the copy?” not “you’re off task”
+- User explains, Nebulaos accepts. “Checking a reference” closes it.
+- Typing slowdown combined with off-workspace = higher confidence drift signal
+
+### Story 4 — Time awareness
+
+*As someone who goes time-blind, I want a visible indicator of session progress so I always know roughly where I am.*
+
+- Progress bar in terminal (via `indicatif` crate)
+- Bar drains on off-task time, not a fixed clock
+- No alarm when it empties. Soft verbal note only.
+
+### Story 5 — Getting better over time
+
+*As a returning user, I want Nebulaos to remember how I work so it gets more useful session by session.*
+
+- After each session, Nebulaos writes a structured reflection to local store
+- Captures: workflow patterns, where I got stuck, what kind of nudge actually worked
+- Next session on the same project type pulls that context automatically
+- I can see and delete anything stored
+
+### Story 6 — Session log and export
+
+*As a solo user, I want to export my session log so I can drop it into Claude or ChatGPT and spot my own patterns.*
+
+- Log written locally at session end
+- Contains: goal declared, time on/off task, drift events, conversation summary, completion status
+- One export command, clean text output
+- No raw audio or screenshots in the log
+- Post-MVP: send report to an accountability partner via email/iMessage, user approves before it goes
+
+### Story 7 — Switching tasks mid-session
+
+*As an ADHD creative who gets interrupted, I want Nebulaos to help me park cleanly so nothing gets lost when I have to switch.*
+
+- User says “I need to deal with something else”
+- Nebulaos asks: “where are you with this — good place to stop or need a few more minutes?”
+- Current task logged as paused with a context snapshot
+- New task gets a fresh session declaration
+- Paused task stays visible. User decides when to come back. Nebulaos doesn’t auto-resume.
+
+### Story 8 — Staying on topic
+
+*As someone who will absolutely go off on tangents, I want Nebulaos to pull me back when the conversation drifts.*
+
+- Off-topic conversation treated the same as screen drift
+- One warm redirect: “that’s interesting, but we’re on the copy — where were you?”
+- Logged as a drift event if it keeps going
+- Nebulaos never starts off-topic conversations itself
+
+-----
+
+## 5. AI and models
+
+### Stack
+
+|Role                         |Model                                    |Where                                      |
+|-----------------------------|-----------------------------------------|-------------------------------------------|
+|Speech to text               |Whisper Tiny                             |On-device                                  |
+|Text to speech               |Kokoro                                   |On-device                                  |
+|Vision / attention classifier|Candle (HuggingFace Rust)                |On-device                                  |
+|Thinking partner             |Hermes 2 Pro 7B or Hermes 3 8B via Ollama|On-device (~4-5GB RAM, fine on M1 16GB)    |
+|Heavy reasoning fallback     |Claude API                               |Cloud (text summaries only, no screenshots)|
+
+### Memory
+
+|Store      |What’s in it                                     |Who updates it                  |
+|-----------|-------------------------------------------------|--------------------------------|
+|Project RAG|Transcripts, briefs, copy, docs                  |User ingests manually           |
+|User model |Workflow patterns, stuck points, what nudges work|Hermes writes after each session|
+
+### How it should behave
+
+- **Restraint.** Knows when to stay quiet. Silence is a valid output.
+- **Warmth.** Conversational, not clinical. Never sycophantic.
+- **Awareness.** Builds a picture of the current task from screen context and RAG, not just what the user says out loud.
+- **No hands.** Read-only. Always.
+
+### Evaluation (MVP)
+
+- Did the user finish what they declared? (binary)
+- Time on task vs off task ratio from the session log
+- Would they open it again? (self-report)
+- Test: 1hr website copy session, with and without Nebulaos
+
+-----
+
+## 6. Technical spec
+
+### Stack
+
+```
+Rust CLI (terminal, no GUI for MVP)
+├── Whisper Tiny — STT via Rust bindings
+├── Kokoro — TTS via ONNX runtime
+├── Candle — vision classifier for screenshots
+├── Ollama HTTP client — Hermes 2 Pro 7B / 3 8B
+├── LanceDB — embedded vector store, no separate process
+├── indicatif — terminal progress bar
+└── Claude API — cloud fallback, text only
+```
+
+### Architecture
+
+```
+Mic → Whisper (STT) ──────────────────────────────┐
+Screen capture → Vision classifier → Session log ──→ Hermes (Ollama)
+LanceDB (project RAG + user model) ───────────────┘
+                                                    ↓
+                                          Kokoro (TTS) → Speaker
+                                                    ↓
+                                     indicatif bar (terminal UI)
+                                                    ↓
+                               Post-session: structured log → export
+```
+
+### Privacy
+
+- Screenshots processed on-device and discarded. Never transmitted.
+- Only text summaries reach the cloud LLM. No raw content, no audio.
+- Audio cleared after each session.
+- LanceDB lives locally. User controls what gets deleted.
+- Open source. Privacy is in the architecture, not a policy.
+
+-----
+
+## 7. Risks and roadmap
+
+### Risks
+
+|Risk                                                         |Likelihood|Mitigation                                   |
+|-------------------------------------------------------------|----------|---------------------------------------------|
+|On-device model quality not good enough for real conversation|Medium    |Claude API fallback for the hard moments     |
+|Continuous STT kills battery or CPU while working            |Medium    |Event-driven capture, not a stream           |
+|Kokoro voice sounds robotic, breaks the presence             |Low-Medium|Spend time on voice selection before shipping|
+|Vision classifier too blunt for context judgment             |Medium    |Ask first, assume second                     |
+|User just ignores it (still escapable)                       |High      |Warmth over time. Report mechanic in v1.1.   |
+
+### Roadmap
+
+**MVP — does it work?**
+
+- 1hr website copy session
+- Rust CLI: STT + TTS + screen capture + Hermes + LanceDB + indicatif
+- Session log + export
+- One question: did the task get done?
+
+**v1.1 — does it feel right?**
+
+- Tune interrupt timing from real session data
+- Better drift detection confidence scoring
+- Post-session reflection working reliably
+- User model building meaningfully over sessions
+- Accountability report via email/iMessage
+
+**v2.0 — does it scale?**
+
+- Tauri + Svelte UI (replaces terminal)
+- Windows support
+- Session history dashboard
+- Persona tuning (more/less talkative)
+- Possible wider release
+
+-----
+
+## 8. Writing voice spec (for AI prompt engineering)
+
+Nebulaos talks like a sharp, warm colleague who knows you. Apply this when writing system prompts.
+
+**Do:**
+
+- Short sentences. Get to the point.
+- Contractions always (don’t, can’t, it’s).
+- Direct address. “You” not “the user.”
+- Specific. “You’ve been on Twitter for 8 minutes” not “you appear to have drifted.”
+- Hedge when uncertain. “I think you might be stuck” not “you are stuck.”
+- Silence when there’s nothing useful to say.
+
+**Don’t:**
+
+- Assistant register (“certainly,” “great question,” “I’d be happy to”)
+- Negative parallelisms (“this isn’t X, it’s Y” — just say Y)
+- Rule of 3 lists
+- Inflate significance (“this is a pivotal moment”)
+- Fill silence with noise
+- Manage or shame
+
+**Banned words:** delve, leverage, seamless, robust, optimize, empower, streamline, innovative, holistic, paradigm, transformative, unlock, elevate, cutting-edge, game-changer, and all others in the voice DNA banned list.
