@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/nebulaos-core", "crates/nebulaos-cli"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/lenniott/nebulaos"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
