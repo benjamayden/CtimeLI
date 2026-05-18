@@ -5,8 +5,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use nebulaos_core::partner::{OllamaPartner, Partner};
 use nebulaos_core::{Command, run};
 use tokio::sync::mpsc;
+
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+const DEFAULT_MODEL: &str = "hermes3:8b";
 
 #[derive(Parser)]
 #[command(name = "nebulaos", version, about = "Calm the nebulous chaos.")]
@@ -28,6 +32,20 @@ enum Cmd {
     },
     /// Export the latest session log.
     Export,
+    /// One-shot chat with the partner via local Ollama.
+    Chat {
+        /// What you want to say.
+        prompt: String,
+        /// Optional context (e.g. current goal).
+        #[arg(long, default_value = "")]
+        context: String,
+        /// Ollama base URL.
+        #[arg(long, default_value = DEFAULT_OLLAMA_URL)]
+        ollama_url: String,
+        /// Model tag.
+        #[arg(long, default_value = DEFAULT_MODEL)]
+        model: String,
+    },
 }
 
 #[tokio::main]
@@ -44,7 +62,21 @@ async fn main() -> Result<()> {
     match cli.command {
         Cmd::Start { minutes, goal } => start(Duration::from_secs(minutes * 60), goal).await,
         Cmd::Export => export(),
+        Cmd::Chat { prompt, context, ollama_url, model } => chat(prompt, context, ollama_url, model).await,
     }
+}
+
+async fn chat(prompt: String, context: String, ollama_url: String, model: String) -> Result<()> {
+    let partner = OllamaPartner::new(ollama_url, model)?;
+    match partner.respond(&prompt, &context).await {
+        Ok(Some(line)) => println!("{line}"),
+        Ok(None) => println!("(silence)"),
+        Err(e) => {
+            eprintln!("partner unreachable: {e}");
+            std::process::exit(2);
+        }
+    }
+    Ok(())
 }
 
 async fn start(total: Duration, goal_arg: Option<String>) -> Result<()> {

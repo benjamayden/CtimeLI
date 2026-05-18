@@ -2,7 +2,7 @@
 
 Calm the nebulous chaos. A read-only thinking partner for ADHD creative work — listens, watches the screen, talks back via an on-device LLM, never touches your work.
 
-**Status:** slice 2 — goal declaration. Session opens with "what are we doing?", takes the goal, threads it through `Command::Declare`. Input is stdin for now; slice 2b swaps it for cpal mic + Whisper Tiny.
+**Status:** slice 3 — partner online. Ollama HTTP client wired with the PRD §8 voice spec as the system prompt. `nebulaos chat` round-trips against a local Hermes. Session loop still uses the stub welcome; slice 3b wires the live partner into the tick loop.
 
 ## Build & run
 
@@ -10,8 +10,11 @@ Calm the nebulous chaos. A read-only thinking partner for ADHD creative work —
 cargo run -p nebulaos-cli -- start
 cargo run -p nebulaos-cli -- start --minutes 25
 cargo run -p nebulaos-cli -- start --goal "draft the homepage hero"
+cargo run -p nebulaos-cli -- chat "I'm stuck on the hero" --context "goal: homepage copy"
 cargo run -p nebulaos-cli -- export
 ```
+
+`chat` requires a local Ollama daemon. Pull a Hermes model first: `ollama pull hermes3:8b`.
 
 `Ctrl-C` ends the session cleanly.
 

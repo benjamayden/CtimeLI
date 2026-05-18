@@ -121,9 +121,11 @@ flowchart TB
 ## Slice status
 
 - Slice 1 — workspace, `Session`, `SessionEvent` stream, `Command` channel, CLI banner + progress bar, all component modules stubbed with traits.
-- **Slice 2 (current).** Goal declaration plumbing. CLI prompts "what are we doing?", reads a line, sends `Command::Declare`. Session emits `GoalDeclared` + a stub `PartnerSaid` welcome. Input is stdin; swap for mic+STT in 2b.
-- Slice 2b — voice in (`cpal` + Whisper Tiny). Replaces `prompt::declare_goal()` with mic capture + transcription, same return contract.
-- Slice 3 — voice out + partner (Kokoro + Ollama).
+- Slice 2 — goal declaration plumbing. CLI prompts "what are we doing?", sends `Command::Declare`, session emits `GoalDeclared` + stub welcome.
+- **Slice 3 (current).** `OllamaPartner` client + PRD §8 system prompt + `nebulaos chat` subcommand. Partner trait is `async_trait`-backed so any future Partner impl (mock, Claude fallback) drops in. Not yet wired into the session tick loop.
+- Slice 2b — voice in (`cpal` + Whisper Tiny). Replaces `prompt::declare_goal()` with mic capture + transcription.
+- Slice 3b — wire `OllamaPartner` into the session loop: live welcome on declare, soft drift check-ins.
+- Slice 3c — Kokoro TTS via `ort` so the partner actually speaks.
 - Slice 4 — eyes (screen capture + Candle + focus).
 - Slice 5 — memory (LanceDB).
 - Slice 6 — log + export + Claude fallback.
