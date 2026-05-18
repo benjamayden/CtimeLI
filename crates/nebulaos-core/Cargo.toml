@@ -19,5 +19,19 @@ serde_json.workspace = true
 async-trait.workspace = true
 directories = "5"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cpal = "0.15"
+whisper-rs = { version = "0.13", default-features = false }
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication"] }
+objc2-foundation = { version = "0.2", features = ["NSString"] }
+
+[features]
+default = []
+# Enable Metal acceleration in whisper-rs. Requires macOS 10.13+. Build flag
+# disabled by default so the first build is most likely to succeed; turn on
+# with `cargo build --features mac-accel` once the baseline is working.
+mac-accel = ["whisper-rs/metal"]
+
 [dev-dependencies]
 tempfile = "3"

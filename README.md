@@ -2,41 +2,75 @@
 
 Calm the nebulous chaos. A read-only thinking partner for ADHD creative work — listens, watches the screen, talks back via an on-device LLM, never touches your work.
 
-**Status:** slice 6 — log, export, fallback all online. Sessions write JSONL to `~/.nebulaos/sessions/`, `nebulaos export` rolls up the latest, `nebulaos fallback` calls Claude when Hermes isn't sharp enough. RAG is file-backed (LanceDB swap is 5b). Voice in (mic+Whisper) and voice out (Kokoro TTS) are macOS-gated stubs — trait contracts in place; impls land when you switch to the Mac.
+**Status:** concept-test ready on macOS. Voice in (mic + Whisper), voice out (`say`), focus-based drift detection, partner via local Ollama, RAG, session log, Claude fallback. macOS-only paths haven't been compile-tested from the dev container — first build on the Mac will surface any glue issues. See `architecture.md` for the C4 view.
 
 ## Build & run
 
 ```sh
 cargo run -p nebulaos-cli -- start --goal "draft the hero" --minutes 25
-cargo run -p nebulaos-cli -- start --goal "..." --ollama         # live partner
-
+cargo run -p nebulaos-cli -- export
+cargo run -p nebulaos-cli -- chat "I'm stuck on the hero"
+cargo run -p nebulaos-cli -- fallback "session went off-task at 23 min"
 cargo run -p nebulaos-cli -- ingest path/to/brief.md
 cargo run -p nebulaos-cli -- recall "homepage hero" --k 5
-
-cargo run -p nebulaos-cli -- chat "I'm stuck on the hero"        # one-shot Hermes
-cargo run -p nebulaos-cli -- fallback "session went off-task at 23 min"  # one-shot Claude
-
-cargo run -p nebulaos-cli -- export
 ```
 
-Local `Ollama` daemon required for `chat` and `--ollama`: `ollama pull hermes3:8b`. `fallback` reads `ANTHROPIC_API_KEY` from env.
+Local Ollama required for `chat` and `--ollama`: `ollama pull hermes3:8b`. Claude fallback reads `ANTHROPIC_API_KEY` from env.
 
-Data lives in the OS data dir (macOS: `~/Library/Application Support/io.lenniott.nebulaos`). Override via `NEBULAOS_DATA_DIR`.
+## Mac setup (concept-test recipe)
 
-`Ctrl-C` ends the session cleanly.
+```sh
+# 1. Toolchain
+xcode-select --install
+brew install cmake ollama
+
+# 2. Models
+ollama serve &
+ollama pull hermes3:8b
+mkdir -p "$HOME/Library/Application Support/io.lenniott.nebulaos/models"
+curl -L -o "$HOME/Library/Application Support/io.lenniott.nebulaos/models/ggml-tiny.bin" \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+
+# 3. Build (first cargo build downloads cpal, whisper-rs, objc2)
+cargo build -p nebulaos-cli
+
+# 4. Verify the wiring
+cargo run -p nebulaos-cli -- doctor
+
+# 5. Run a 25-min concept test
+cargo run -p nebulaos-cli -- start \
+  --mic \
+  --voice \
+  --ollama \
+  --workspaces "Figma,Notion,Code,Pages,TextEdit" \
+  --minutes 25
+```
+
+What that gives you:
+- Push-to-talk goal declaration (press Enter to start, Enter to stop).
+- Hermes via Ollama generates the welcome + every drift nudge.
+- macOS `say` reads partner lines aloud while they print.
+- NSWorkspace polls the frontmost app every 500ms; anything not in `--workspaces` counts as off-task; 60s of accumulated off-task fires a soft check-in (5-min cooldown).
+- Everything writes to `~/Library/Application Support/io.lenniott.nebulaos/sessions/`.
+
+First mic use prompts for microphone permission. If you skip it, capture returns silence and the goal falls back to a typed prompt.
+
+Faster Whisper (Metal-accelerated): `cargo run --features mac-accel -p nebulaos-cli -- start ...`.
 
 ## Layout
 
 ```
 crates/
-  nebulaos-core/   library — session state, all component traits. Frontend-agnostic.
-  nebulaos-cli/    binary — terminal frontend (clap + indicatif). Swappable with a Tauri app later.
+  nebulaos-core/   library — session state, partner, audio, vision, stt, focus, rag, log, fallback, paths
+  nebulaos-cli/    binary — terminal frontend (clap + indicatif + macOS glue)
 PRD                vision doc
 architecture.md    C4 diagrams (system context, containers, components)
 ```
 
 The core never imports `indicatif`, `clap`, or `println!` — a future Tauri frontend drops in by depending on `nebulaos-core` and rendering the same `SessionEvent` stream.
 
-## Roadmap
+## Data dir
 
-See `PRD` §7 (MVP / v1.1 / v2.0) and the slice list in `architecture.md`.
+macOS: `~/Library/Application Support/io.lenniott.nebulaos/`. Override with `NEBULAOS_DATA_DIR=/path`.
+
+Contains `sessions/`, `rag/`, `models/`. Delete anything any time — it's all yours.

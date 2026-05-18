@@ -126,16 +126,19 @@ flowchart TB
 - Slice 3b — partner wired into the session loop. `run()` takes `Option<Arc<dyn Partner>>`; the live partner generates the welcome on `Declare` and a soft line on each `DriftSoftCheck`. Falls back to the stub welcome if Ollama is unreachable.
 - Slice 4 — drift state machine. `Command::Focus { app, attention }` updates on-task/off-task counters. After 60s of accumulated off-task time the session emits `DriftSoftCheck` (5-min cooldown). Macros: when an `OnTask` focus arrives, the drift counter resets — drift cleared, no lecture.
 - Slice 5 — file-backed RAG. `JsonlRag` appends one row per chunk to `chunks.jsonl`, substring-scores at query time, writes session reflections to `reflections.jsonl`. CLI: `nebulaos ingest <file>`, `nebulaos recall <query>`. Trait stays clean for the LanceDB swap.
-- **Slice 6 (current).** `JsonlSessionLog` records every `SessionEvent` (ticks downsampled 1/60s) to `<data>/sessions/session-<ts>.jsonl`. `nebulaos export` finds the latest session and prints goal · on/off-task · ratio · drift count · partner lines · completion status. `ClaudeFallback` posts to Anthropic `/v1/messages` with the same voice-spec system prompt; `nebulaos fallback "<summary>"` round-trips. `ANTHROPIC_API_KEY` from env.
+- Slice 6 — `JsonlSessionLog` + `export` + `ClaudeFallback`. Session log records every event (ticks downsampled 1/60s); export prints goal · on/off-task · ratio · drift count · partner lines · completion. Claude fallback talks to `/v1/messages` with the voice-spec system prompt.
+- **Slice 7 (current, macOS).** Real-world IO wired:
+  - `audio::MacMicCapture` (`cpal` + CoreAudio) + `stt::WhisperTranscriber` (`whisper-rs`, `ggml-tiny.bin`). Push-to-talk goal declaration via `--mic`.
+  - `audio::SaySpeech` shells out to `/usr/bin/say`. Speaks partner lines while they print, via `--voice`.
+  - `focus::spawn_focus_listener()` polls `NSWorkspace.frontmostApplication` every 500ms; the CLI relays each change as `Command::Focus`, classified by `WorkspaceClassifier` against the `--workspaces` list. 60s accumulated off-task fires `DriftSoftCheck` → live partner nudge.
+  - `nebulaos doctor` checks Ollama, model file, NSWorkspace, anthropic key, data dir.
 
-### Deferred (need macOS for honest testing)
+Slice 7 substitutes for PRD §6 in two places, kept behind the same trait so they can be swapped later: `say` instead of Kokoro (replace `SaySpeech` with a Kokoro `AudioOutput`); name-based `WorkspaceClassifier` instead of Candle vision (replace `classify()` with a screenshot → `Attention` call).
 
-- Slice 2b — `cpal` mic + `whisper-rs` Whisper Tiny. Replaces `prompt::declare_goal()` with `mic.capture() → stt.transcribe()`. Trait contracts in `src/audio/mod.rs` and `src/stt/mod.rs` already match.
-- Slice 3c — Kokoro TTS via `ort`. Replaces the bar's `bar.println("← {line}")` with an `AudioOutput::speak(line)` call.
-- Slice 4-mac — `NSWorkspace` focus listener that drives `Command::Focus` for real. Trait in `src/focus/mod.rs` is ready.
-- Slice 5b — swap `JsonlRag` for `lancedb` + an embedding model. Same `Rag` trait, no caller changes.
-- Slice 4 — eyes (screen capture + Candle + focus).
-- Slice 5 — memory (LanceDB).
-- Slice 6 — log + export + Claude fallback.
+### Deferred
+
+- Kokoro TTS via `ort` — swap inside `AudioOutput`.
+- Candle vision classifier — swap inside `WorkspaceClassifier::classify`.
+- LanceDB + embeddings — swap inside `Rag`.
 
 Each slice keeps `cargo run -p nebulaos-cli -- start` runnable and updates this doc if a component's shape changes.

@@ -1,12 +1,19 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use futures::{Stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use nebulaos_core::SessionEvent;
+use nebulaos_core::audio::AudioOutput;
 use nebulaos_core::log::JsonlSessionLog;
 
-pub async fn render<S>(events: S, total: Duration, log: &mut JsonlSessionLog) -> Result<()>
+pub async fn render<S>(
+    events: S,
+    total: Duration,
+    log: &mut JsonlSessionLog,
+    speaker: Option<Arc<dyn AudioOutput>>,
+) -> Result<()>
 where
     S: Stream<Item = SessionEvent>,
 {
@@ -37,6 +44,9 @@ where
             }
             SessionEvent::PartnerSaid(line) => {
                 bar.println(format!("  ← {line}"));
+                if let Some(s) = speaker.as_ref() {
+                    speak_in_background(s.clone(), line.clone());
+                }
             }
             SessionEvent::DriftSoftCheck => {
                 tracing::debug!("drift soft check fired");
@@ -48,4 +58,12 @@ where
         }
     }
     Ok(())
+}
+
+fn speak_in_background(speaker: Arc<dyn AudioOutput>, line: String) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = speaker.speak(&line) {
+            tracing::warn!(error = ?e, "tts failed");
+        }
+    });
 }

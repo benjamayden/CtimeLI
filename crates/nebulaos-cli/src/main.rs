@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod mac;
 mod prompt;
 mod ui;
 
@@ -12,6 +14,8 @@ use nebulaos_core::log::{JsonlSessionLog, SessionSummary, export_latest};
 use nebulaos_core::partner::{OllamaPartner, Partner};
 use nebulaos_core::rag::{JsonlRag, Rag};
 use nebulaos_core::vision::Attention;
+#[cfg(target_os = "macos")]
+use nebulaos_core::vision::WorkspaceClassifier;
 use nebulaos_core::{Command, paths, run};
 use tokio::sync::mpsc;
 
@@ -44,6 +48,18 @@ enum Cmd {
         /// Model tag.
         #[arg(long, default_value = DEFAULT_MODEL)]
         model: String,
+        /// macOS: declare the goal by voice (push-to-talk Whisper). Defaults
+        /// to stdin if the Whisper model file is missing.
+        #[arg(long)]
+        mic: bool,
+        /// macOS: speak partner lines via `/usr/bin/say` while they print.
+        #[arg(long)]
+        voice: bool,
+        /// macOS: watch the frontmost app and classify on/off-task by name.
+        /// Comma-separated list of app names that count as on-task (e.g.
+        /// `Figma,Notion,Code`).
+        #[arg(long, value_delimiter = ',')]
+        workspaces: Vec<String>,
     },
     /// Export the latest session as clean text.
     Export,
@@ -77,6 +93,9 @@ enum Cmd {
         #[arg(long)]
         model: Option<String>,
     },
+    /// macOS: check that everything Nebulaos needs is wired up.
+    #[cfg(target_os = "macos")]
+    Doctor,
 }
 
 #[tokio::main]
@@ -91,20 +110,35 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Cmd::Start { minutes, goal, ollama, ollama_url, model } => {
+        Cmd::Start {
+            minutes, goal, ollama, ollama_url, model, mic, voice, workspaces,
+        } => {
             let partner = if ollama {
                 Some(Arc::new(OllamaPartner::new(ollama_url, model)?) as Arc<dyn Partner>)
             } else {
                 None
             };
-            start(Duration::from_secs(minutes * 60), goal, partner).await
+            start(
+                Duration::from_secs(minutes * 60),
+                goal,
+                partner,
+                StartOptions { mic, voice, workspaces },
+            ).await
         }
         Cmd::Export => export(),
         Cmd::Chat { prompt, context, ollama_url, model } => chat(prompt, context, ollama_url, model).await,
         Cmd::Ingest { file, source } => ingest(file, source),
         Cmd::Recall { query, k } => recall(query, k),
         Cmd::Fallback { summary, model } => fallback(summary, model).await,
+        #[cfg(target_os = "macos")]
+        Cmd::Doctor => mac::doctor(),
     }
+}
+
+struct StartOptions {
+    mic: bool,
+    voice: bool,
+    workspaces: Vec<String>,
 }
 
 async fn chat(prompt: String, context: String, ollama_url: String, model: String) -> Result<()> {
@@ -124,28 +158,31 @@ async fn start(
     total: Duration,
     goal_arg: Option<String>,
     partner: Option<Arc<dyn Partner>>,
+    opts: StartOptions,
 ) -> Result<()> {
     print_banner(total);
 
     let goal = match goal_arg {
         Some(g) => g,
-        None => prompt::declare_goal()?,
+        None => declare_goal(opts.mic)?,
     };
 
     let sessions_dir = paths::sessions_dir()?;
     let session_id = paths::new_session_id();
     let mut log = JsonlSessionLog::new(&sessions_dir, &session_id)?;
     println!("logging to {}", log.path().display());
+    if !opts.workspaces.is_empty() {
+        println!("workspaces: {}", opts.workspaces.join(", "));
+    }
     println!();
 
-    let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(8);
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
     let events = run(cmd_rx, total, partner);
 
     cmd_tx.send(Command::Declare(goal)).await.ok();
-    cmd_tx.send(Command::Focus {
-        app: "(unknown)".into(),
-        attention: Attention::OnTask,
-    }).await.ok();
+
+    let _focus_task = spawn_focus(&cmd_tx, &opts);
+    let speaker = build_speaker(opts.voice);
 
     let cmd_tx_end = cmd_tx.clone();
     let ctrl_c = tokio::spawn(async move {
@@ -153,9 +190,78 @@ async fn start(
         let _ = cmd_tx_end.send(Command::End { completed: false }).await;
     });
 
-    ui::render(events, total, &mut log).await?;
+    ui::render(events, total, &mut log, speaker).await?;
     ctrl_c.abort();
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_focus(cmd_tx: &mpsc::Sender<Command>, opts: &StartOptions) -> Option<tokio::task::JoinHandle<()>> {
+    if opts.workspaces.is_empty() {
+        let tx = cmd_tx.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(Command::Focus {
+                app: "(unknown)".into(),
+                attention: Attention::OnTask,
+            }).await;
+        });
+        return None;
+    }
+    let classifier = WorkspaceClassifier::new(opts.workspaces.clone());
+    match mac::spawn_focus_relay(cmd_tx.clone(), classifier) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::warn!(error = ?e, "focus listener failed — assuming on-task");
+            let tx = cmd_tx.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(Command::Focus {
+                    app: "(unknown)".into(),
+                    attention: Attention::OnTask,
+                }).await;
+            });
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_focus(cmd_tx: &mpsc::Sender<Command>, _opts: &StartOptions) -> Option<tokio::task::JoinHandle<()>> {
+    let tx = cmd_tx.clone();
+    tokio::spawn(async move {
+        let _ = tx.send(Command::Focus {
+            app: "(unknown)".into(),
+            attention: Attention::OnTask,
+        }).await;
+    });
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn declare_goal(mic: bool) -> Result<String> {
+    if mic {
+        mac::declare_goal_voice()
+    } else {
+        prompt::declare_goal()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn declare_goal(_mic: bool) -> Result<String> {
+    prompt::declare_goal()
+}
+
+#[cfg(target_os = "macos")]
+fn build_speaker(voice: bool) -> Option<Arc<dyn nebulaos_core::audio::AudioOutput>> {
+    if voice {
+        Some(Arc::new(mac::speaker()))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn build_speaker(_voice: bool) -> Option<Arc<dyn nebulaos_core::audio::AudioOutput>> {
+    None
 }
 
 fn export() -> Result<()> {

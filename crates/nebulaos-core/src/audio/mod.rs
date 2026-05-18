@@ -2,17 +2,23 @@
 //!
 //! ## Status
 //!
-//! - Slice 2b (TODO, macOS): real `cpal` mic capture for `AudioInput`. Pull
-//!   the [`cpal`] crate behind `[target.'cfg(target_os = "macos")']`, build
-//!   a stream that hands i16 PCM to the `stt::SpeechToText` impl.
-//! - Slice 3c (TODO, macOS): real Kokoro TTS via `ort` for `AudioOutput`.
-//!   Bundle the ONNX model in `assets/`, load it at session start.
-//!
-//! Today the traits are wired into nothing — `nebulaos start` skips mic/voice
-//! entirely. The session machine drives off `Command::Focus` and stdin goal
-//! declaration, so the rest of the pipeline is already exercised.
+//! - Slice 3c (macOS): `SaySpeech` shells out to `/usr/bin/say` for TTS.
+//!   Works on every Mac without any model file or extra deps; swap to a
+//!   Kokoro ONNX `AudioOutput` impl later.
+//! - Slice 2b (macOS, in progress): `MacMicCapture` via `cpal`, paired with
+//!   `stt::WhisperTranscriber` for speech-to-text on goal declaration.
 
 use anyhow::Result;
+
+#[cfg(target_os = "macos")]
+mod mac_mic;
+#[cfg(target_os = "macos")]
+mod mac_say;
+
+#[cfg(target_os = "macos")]
+pub use mac_mic::{MacMicCapture, CaptureHandle};
+#[cfg(target_os = "macos")]
+pub use mac_say::SaySpeech;
 
 pub trait AudioInput: Send + Sync {
     fn start(&mut self) -> Result<()>;
@@ -22,3 +28,4 @@ pub trait AudioInput: Send + Sync {
 pub trait AudioOutput: Send + Sync {
     fn speak(&self, text: &str) -> Result<()>;
 }
+
