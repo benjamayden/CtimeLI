@@ -120,12 +120,20 @@ flowchart TB
 
 ## Slice status
 
-- Slice 1 — workspace, `Session`, `SessionEvent` stream, `Command` channel, CLI banner + progress bar, all component modules stubbed with traits.
+- Slice 1 — workspace, `Session`, `SessionEvent` stream, `Command` channel, CLI banner + progress bar, component modules stubbed with traits.
 - Slice 2 — goal declaration plumbing. CLI prompts "what are we doing?", sends `Command::Declare`, session emits `GoalDeclared` + stub welcome.
-- **Slice 3 (current).** `OllamaPartner` client + PRD §8 system prompt + `nebulaos chat` subcommand. Partner trait is `async_trait`-backed so any future Partner impl (mock, Claude fallback) drops in. Not yet wired into the session tick loop.
-- Slice 2b — voice in (`cpal` + Whisper Tiny). Replaces `prompt::declare_goal()` with mic capture + transcription.
-- Slice 3b — wire `OllamaPartner` into the session loop: live welcome on declare, soft drift check-ins.
-- Slice 3c — Kokoro TTS via `ort` so the partner actually speaks.
+- Slice 3 — `OllamaPartner` client + PRD §8 system prompt + `nebulaos chat`.
+- Slice 3b — partner wired into the session loop. `run()` takes `Option<Arc<dyn Partner>>`; the live partner generates the welcome on `Declare` and a soft line on each `DriftSoftCheck`. Falls back to the stub welcome if Ollama is unreachable.
+- Slice 4 — drift state machine. `Command::Focus { app, attention }` updates on-task/off-task counters. After 60s of accumulated off-task time the session emits `DriftSoftCheck` (5-min cooldown). Macros: when an `OnTask` focus arrives, the drift counter resets — drift cleared, no lecture.
+- Slice 5 — file-backed RAG. `JsonlRag` appends one row per chunk to `chunks.jsonl`, substring-scores at query time, writes session reflections to `reflections.jsonl`. CLI: `nebulaos ingest <file>`, `nebulaos recall <query>`. Trait stays clean for the LanceDB swap.
+- **Slice 6 (current).** `JsonlSessionLog` records every `SessionEvent` (ticks downsampled 1/60s) to `<data>/sessions/session-<ts>.jsonl`. `nebulaos export` finds the latest session and prints goal · on/off-task · ratio · drift count · partner lines · completion status. `ClaudeFallback` posts to Anthropic `/v1/messages` with the same voice-spec system prompt; `nebulaos fallback "<summary>"` round-trips. `ANTHROPIC_API_KEY` from env.
+
+### Deferred (need macOS for honest testing)
+
+- Slice 2b — `cpal` mic + `whisper-rs` Whisper Tiny. Replaces `prompt::declare_goal()` with `mic.capture() → stt.transcribe()`. Trait contracts in `src/audio/mod.rs` and `src/stt/mod.rs` already match.
+- Slice 3c — Kokoro TTS via `ort`. Replaces the bar's `bar.println("← {line}")` with an `AudioOutput::speak(line)` call.
+- Slice 4-mac — `NSWorkspace` focus listener that drives `Command::Focus` for real. Trait in `src/focus/mod.rs` is ready.
+- Slice 5b — swap `JsonlRag` for `lancedb` + an embedding model. Same `Rag` trait, no caller changes.
 - Slice 4 — eyes (screen capture + Candle + focus).
 - Slice 5 — memory (LanceDB).
 - Slice 6 — log + export + Claude fallback.

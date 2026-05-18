@@ -4,6 +4,7 @@ pub mod fallback;
 pub mod focus;
 pub mod log;
 pub mod partner;
+pub mod paths;
 pub mod rag;
 pub mod session;
 pub mod stt;

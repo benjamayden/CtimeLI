@@ -1,9 +1,5 @@
-//! Session log + export. PRD §4 Story 6. Slice 6.
+//! Session log + export. PRD §4 Story 6.
 
-use anyhow::Result;
-use std::path::PathBuf;
+mod jsonl;
 
-pub trait SessionLog: Send + Sync {
-    fn record(&mut self, line: &str) -> Result<()>;
-    fn export(&self) -> Result<PathBuf>;
-}
+pub use jsonl::{JsonlSessionLog, SessionSummary, export_latest, summarize};

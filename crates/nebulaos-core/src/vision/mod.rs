@@ -9,6 +9,17 @@ pub enum Attention {
     Unknown,
 }
 
+impl Attention {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "on" | "on-task" | "ontask" => Some(Attention::OnTask),
+            "off" | "off-task" | "offtask" => Some(Attention::OffTask),
+            "unknown" | "?" => Some(Attention::Unknown),
+            _ => None,
+        }
+    }
+}
+
 pub trait Vision: Send + Sync {
     fn snapshot(&self) -> Result<Attention>;
 }
