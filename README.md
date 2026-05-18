@@ -2,13 +2,14 @@
 
 Calm the nebulous chaos. A read-only thinking partner for ADHD creative work — listens, watches the screen, talks back via an on-device LLM, never touches your work.
 
-**Status:** slice 1 — skeleton. Workspace, session loop, terminal progress bar. No audio, vision, or model integration yet.
+**Status:** slice 2 — goal declaration. Session opens with "what are we doing?", takes the goal, threads it through `Command::Declare`. Input is stdin for now; slice 2b swaps it for cpal mic + Whisper Tiny.
 
 ## Build & run
 
 ```sh
 cargo run -p nebulaos-cli -- start
 cargo run -p nebulaos-cli -- start --minutes 25
+cargo run -p nebulaos-cli -- start --goal "draft the homepage hero"
 cargo run -p nebulaos-cli -- export
 ```
 

@@ -120,8 +120,9 @@ flowchart TB
 
 ## Slice status
 
-- **Slice 1 (current).** Workspace, `Session`, `SessionEvent` stream, `Command` channel, CLI banner + progress bar, all component modules stubbed with traits.
-- Slice 2 — voice in (`cpal` + Whisper).
+- Slice 1 — workspace, `Session`, `SessionEvent` stream, `Command` channel, CLI banner + progress bar, all component modules stubbed with traits.
+- **Slice 2 (current).** Goal declaration plumbing. CLI prompts "what are we doing?", reads a line, sends `Command::Declare`. Session emits `GoalDeclared` + a stub `PartnerSaid` welcome. Input is stdin; swap for mic+STT in 2b.
+- Slice 2b — voice in (`cpal` + Whisper Tiny). Replaces `prompt::declare_goal()` with mic capture + transcription, same return contract.
 - Slice 3 — voice out + partner (Kokoro + Ollama).
 - Slice 4 — eyes (screen capture + Candle + focus).
 - Slice 5 — memory (LanceDB).

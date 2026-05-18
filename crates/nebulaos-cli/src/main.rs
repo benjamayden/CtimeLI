@@ -1,3 +1,4 @@
+mod prompt;
 mod ui;
 
 use std::time::Duration;
@@ -21,6 +22,9 @@ enum Cmd {
         /// Session length in minutes.
         #[arg(long, default_value_t = 60)]
         minutes: u64,
+        /// Skip the goal prompt (declare the goal inline).
+        #[arg(long)]
+        goal: Option<String>,
     },
     /// Export the latest session log.
     Export,
@@ -38,20 +42,28 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Cmd::Start { minutes } => start(Duration::from_secs(minutes * 60)).await,
+        Cmd::Start { minutes, goal } => start(Duration::from_secs(minutes * 60), goal).await,
         Cmd::Export => export(),
     }
 }
 
-async fn start(total: Duration) -> Result<()> {
+async fn start(total: Duration, goal_arg: Option<String>) -> Result<()> {
     print_banner(total);
+
+    let goal = match goal_arg {
+        Some(g) => g,
+        None => prompt::declare_goal()?,
+    };
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(8);
     let events = run(cmd_rx, total);
 
+    cmd_tx.send(Command::Declare(goal)).await.ok();
+
+    let cmd_tx_end = cmd_tx.clone();
     let ctrl_c = tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
-        let _ = cmd_tx.send(Command::End { completed: false }).await;
+        let _ = cmd_tx_end.send(Command::End { completed: false }).await;
     });
 
     ui::render(events, total).await?;
@@ -66,7 +78,7 @@ fn export() -> Result<()> {
 
 fn print_banner(total: Duration) {
     let mins = total.as_secs() / 60;
-    println!("nebulaos — slice 1 skeleton");
+    println!("nebulaos");
     println!("session length: {mins} min  |  press Ctrl-C to end");
     println!();
 }

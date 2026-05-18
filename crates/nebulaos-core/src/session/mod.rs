@@ -78,7 +78,11 @@ pub fn run(mut commands: mpsc::Receiver<Command>, total: Duration) -> impl Strea
                     match cmd {
                         Some(Command::Declare(goal)) => {
                             session.goal = Some(goal.clone());
+                            let welcome = crate::partner::welcome(&goal);
                             if tx.send(SessionEvent::GoalDeclared(goal)).await.is_err() {
+                                break;
+                            }
+                            if tx.send(SessionEvent::PartnerSaid(welcome)).await.is_err() {
                                 break;
                             }
                         }
@@ -130,6 +134,34 @@ mod tests {
         assert_eq!(s.on_task, Duration::ZERO);
         assert_eq!(s.off_task, Duration::ZERO);
         assert_eq!(s.total, Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn declare_emits_goal_then_welcome() {
+        let (tx, rx) = mpsc::channel(4);
+        let mut stream = Box::pin(run(rx, Duration::from_secs(60)));
+
+        tx.send(Command::Declare("the copy".into())).await.unwrap();
+        tx.send(Command::End { completed: true }).await.unwrap();
+
+        let mut saw_goal = false;
+        let mut saw_welcome = false;
+        while let Some(evt) = stream.next().await {
+            match evt {
+                SessionEvent::GoalDeclared(g) => {
+                    assert_eq!(g, "the copy");
+                    saw_goal = true;
+                }
+                SessionEvent::PartnerSaid(line) => {
+                    assert!(line.contains("the copy"));
+                    saw_welcome = true;
+                }
+                SessionEvent::Ended { .. } => break,
+                _ => {}
+            }
+        }
+        assert!(saw_goal, "missing GoalDeclared");
+        assert!(saw_welcome, "missing PartnerSaid welcome");
     }
 
     #[tokio::test]
