@@ -3,8 +3,10 @@
 
 Usage:
     ./run 6:00
+    ./run 15              # 15 minutes (quick input)
     ./run --for-minutes 25
-    cp .env.example .env   # tune shake + block-on-end
+    ./run watch           # watcher: auto-starts from calendar, or type 15 / 14:00
+    cp .env.example .env   # tune shake + block-on-end + calendar
 
 Config: .env in this directory (see .env.example). CLI flags override .env.
 """
@@ -13,9 +15,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import math
 import os
-import re
+import select
 import signal
 import subprocess
 import sys
@@ -26,6 +29,7 @@ import objc
 from Cocoa import NSBezierPath, NSColor, NSFont, NSMakeRect
 
 from config import AppConfig, shake_intensity
+from input_parse import parse_quick_input
 
 try:
     from ApplicationServices import (
@@ -34,6 +38,8 @@ try:
         AXUIElementSetAttributeValue,
         AXValueCreate,
         AXValueGetValue,
+        CGEventCreate,
+        CGEventGetLocation,
         kAXValueCGPointType,
     )
 
@@ -41,15 +47,36 @@ try:
 except ImportError:
     _HAS_ACCESSIBILITY = False
 
+try:
+    from calendar_monitor import CalendarMonitor
+except ImportError:
+    CalendarMonitor = None  # type: ignore[misc, assignment]
+
 STROKE_BLUE = (0.2, 0.75, 1.0)
 STROKE_RED = (1.0, 0.12, 0.12)
 FRAME_INTERVAL = 1.0 / 60.0
 DISPLAY_SMOOTH_RATE = 9.0
 
-TIME_RE = re.compile(
-    r"^(\d{1,2})(?::(\d{2})(?::(\d{2}))?)?\s*(am|pm|a\.m\.|p\.m\.)?$",
-    re.IGNORECASE,
-)
+
+def _mouse_location_cocoa() -> AppKit.NSPoint | None:
+    """Mouse position in Cocoa screen coordinates (safe on main thread only)."""
+    try:
+        return AppKit.NSEvent.mouseLocation()
+    except Exception:
+        pass
+    if not _HAS_ACCESSIBILITY:
+        return None
+    try:
+        loc = CGEventGetLocation(CGEventCreate(None))
+        primary = AppKit.NSScreen.screens()[0].frame()
+        return AppKit.NSPoint(loc.x, primary.origin.y + primary.size.height - loc.y)
+    except Exception:
+        return None
+
+
+def _finish_button_screen_rect(hud) -> AppKit.NSRect:
+    rect = hud._finish_btn.convertRect_toView_(hud._finish_btn.bounds(), None)
+    return hud.convertRectToScreen_(rect)
 
 
 def _smoothstep(t: float) -> float:
@@ -57,58 +84,39 @@ def _smoothstep(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-def _stroke_color_for_fraction(fraction: float, red_zone: float):
+def _stroke_color_for_fraction(
+    fraction: float,
+    red_zone: float,
+    stroke_base: tuple[float, float, float] = STROKE_BLUE,
+):
     if fraction > red_zone:
-        r, g, b = STROKE_BLUE
+        r, g, b = stroke_base
     else:
         t = _smoothstep(1.0 - (fraction / red_zone))
-        r = STROKE_BLUE[0] + t * (STROKE_RED[0] - STROKE_BLUE[0])
-        g = STROKE_BLUE[1] + t * (STROKE_RED[1] - STROKE_BLUE[1])
-        b = STROKE_BLUE[2] + t * (STROKE_RED[2] - STROKE_BLUE[2])
+        r = stroke_base[0] + t * (STROKE_RED[0] - stroke_base[0])
+        g = stroke_base[1] + t * (STROKE_RED[1] - stroke_base[1])
+        b = stroke_base[2] + t * (STROKE_RED[2] - stroke_base[2])
     return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 0.95)
 
 
-def parse_target_time(raw: str) -> dt.datetime:
-    """Parse a clock time into the next future datetime."""
-    m = TIME_RE.match(raw.strip())
-    if not m:
-        raise ValueError(f"Could not parse time: {raw!r} (try 6:00, 18:00, or 6:00pm)")
+# TERM_PROGRAM values → macOS application names for activate / block-end skip.
+_TERM_PROGRAM_TO_APP: dict[str, str] = {
+    "Apple_Terminal": "Terminal",
+    "iTerm.app": "iTerm2",
+}
 
-    hour = int(m.group(1))
-    minute = int(m.group(2) or 0)
-    second = int(m.group(3) or 0)
-    meridiem = (m.group(4) or "").lower().replace(".", "")
 
-    if minute >= 60 or second >= 60 or hour > 23:
-        raise ValueError(f"Invalid time: {raw!r}")
-
+def calendar_block_target(event_start: dt.datetime, cfg: AppConfig) -> dt.datetime | None:
+    """When block/shake/stroke zero should fire for a calendar event."""
     now = dt.datetime.now()
+    block_at = event_start - dt.timedelta(minutes=cfg.calendar_block_before_mins)
+    if block_at <= now:
+        return None
+    return block_at
 
-    if meridiem in {"am", "pm"}:
-        if hour < 1 or hour > 12:
-            raise ValueError(f"Hour must be 1–12 with am/pm: {raw!r}")
-        if meridiem == "pm" and hour != 12:
-            hour += 12
-        elif meridiem == "am" and hour == 12:
-            hour = 0
-        target = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
-        if target <= now:
-            target += dt.timedelta(days=1)
-        return target
 
-    if hour >= 13:
-        target = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
-        if target <= now:
-            target += dt.timedelta(days=1)
-        return target
-
-    candidates: list[dt.datetime] = []
-    for h in {hour % 12, (hour % 12) + 12}:
-        t = now.replace(hour=h, minute=minute, second=second, microsecond=0)
-        if t <= now:
-            t += dt.timedelta(days=1)
-        candidates.append(t)
-    return min(candidates, key=lambda t: t - now)
+def calendar_stroke_base(cfg: AppConfig) -> tuple[float, float, float]:
+    return (cfg.calendar_stroke_r, cfg.calendar_stroke_g, cfg.calendar_stroke_b)
 
 
 def format_duration(seconds: float) -> str:
@@ -143,12 +151,58 @@ _SKIP_SHAKE_APPS = {
 }
 
 
-def _shake_host_names() -> set[str]:
+def _host_app_names() -> set[str]:
     names = set(_SKIP_SHAKE_APPS)
     term = os.environ.get("TERM_PROGRAM", "").strip()
     if term:
         names.add(term)
+        mapped = _TERM_PROGRAM_TO_APP.get(term)
+        if mapped:
+            names.add(mapped)
     return names
+
+
+def _shake_host_names() -> set[str]:
+    return _host_app_names()
+
+
+def _frontmost_pid() -> int | None:
+    app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    if app is None:
+        return None
+    name = (app.localizedName() or "").lower()
+    if name in {"python", "org.python.python"}:
+        return None
+    return app.processIdentifier()
+
+
+def _activate_pid(pid: int) -> bool:
+    for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications():
+        if app.processIdentifier() == pid:
+            return bool(
+                app.activateWithOptions_(
+                    AppKit.NSApplicationActivateIgnoringOtherApps
+                    | AppKit.NSApplicationActivateAllWindows
+                )
+            )
+    return False
+
+
+def _activate_finder() -> None:
+    subprocess.run(
+        ["osascript", "-e", 'tell application "Finder" to activate'],
+        capture_output=True,
+        check=False,
+    )
+
+
+def _prepare_for_session_ui() -> None:
+    AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+
+
+def _set_watcher_idle_policy() -> None:
+    AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyProhibited)
+    AppKit.NSApp.hide_(None)
 
 
 # System processes — never touched on block dismiss.
@@ -176,6 +230,9 @@ _PROCESS_NAME_ALIASES: dict[str, frozenset[str]] = {
     "system preferences": frozenset({"System Settings"}),
     "iterm": frozenset({"iTerm2", "iTerm"}),
     "vscode": frozenset({"Code"}),
+    "terminal": frozenset({"Terminal", "Apple_Terminal"}),
+    "apple_terminal": frozenset({"Terminal", "Apple_Terminal"}),
+    "cursor": frozenset({"Cursor"}),
 }
 
 
@@ -216,8 +273,58 @@ def _foreground_process_names() -> list[str]:
     return [name.strip() for name in raw.split(", ")]
 
 
+def _running_app_names() -> list[str]:
+    """All regular GUI apps — including those without visible windows."""
+    ws = AppKit.NSWorkspace.sharedWorkspace()
+    names: list[str] = []
+    seen: set[str] = set()
+    for app in ws.runningApplications():
+        if app.activationPolicy() != AppKit.NSApplicationActivationPolicyRegular:
+            continue
+        name = app.localizedName() or ""
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def _process_is_skipped(process: str, skip: frozenset[str]) -> bool:
+    expanded = _expand_block_end_names(skip)
+    if process in expanded:
+        return True
+    lower = process.lower()
+    return lower in {name.lower() for name in expanded}
+
+
+def _block_end_targets_process(process: str, cfg: AppConfig) -> bool:
+    """True if .env block-end rules apply to this app (hide/minimize/quit)."""
+    if _process_in_list(process, cfg.block_end_quit):
+        return True
+    if _process_in_list(process, cfg.block_end_hide):
+        return True
+    if _process_in_list(process, cfg.block_end_minimize):
+        return True
+    return False
+
+
+def _app_name_for_pid(pid: int) -> str | None:
+    for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications():
+        if app.processIdentifier() == pid:
+            return app.localizedName()
+    return None
+
+
+def _should_restore_focus_pid(pid: int | None, cfg: AppConfig) -> bool:
+    if pid is None:
+        return False
+    name = _app_name_for_pid(pid)
+    if not name or _block_end_targets_process(name, cfg):
+        return False
+    return True
+
+
 def _action_for_process(process: str, cfg: AppConfig, skip: frozenset[str]) -> str:
-    if process in skip:
+    if _process_is_skipped(process, skip):
         return "skip"
     if _process_in_list(process, cfg.block_end_quit):
         return "quit"
@@ -309,21 +416,43 @@ return minCount
         return 0
 
 
-def apply_block_end_actions(cfg: AppConfig) -> dict[str, int]:
+def apply_block_end_actions(
+    cfg: AppConfig,
+    *,
+    extra_skip: frozenset[str] = frozenset(),
+) -> dict[str, int]:
     """Minimize, hide, or quit apps per .env when block-on-end overlay is dismissed."""
-    skip = frozenset(_SYSTEM_SKIP_PROCESSES | cfg.block_end_skip)
+    skip = frozenset(_SYSTEM_SKIP_PROCESSES | cfg.block_end_skip | extra_skip)
     to_quit: list[str] = []
     to_hide: list[str] = []
     to_minimize: list[str] = []
+    assigned: set[str] = set()
 
-    for process in _foreground_process_names():
-        action = _action_for_process(process, cfg, skip)
+    def assign(process: str, action: str) -> None:
+        if _process_is_skipped(process, skip) or process in assigned:
+            return
+        assigned.add(process)
         if action == "quit":
             to_quit.append(process)
         elif action == "hide":
             to_hide.append(process)
         elif action == "minimize":
             to_minimize.append(process)
+
+    # Explicit .env lists — act on every matching running app, not just foreground.
+    for process in _running_app_names():
+        if _process_in_list(process, cfg.block_end_quit):
+            assign(process, "quit")
+        elif _process_in_list(process, cfg.block_end_hide):
+            assign(process, "hide")
+        elif _process_in_list(process, cfg.block_end_minimize):
+            assign(process, "minimize")
+
+    # Default action for visible apps not already assigned.
+    for process in _foreground_process_names():
+        if process in assigned or _process_is_skipped(process, skip):
+            continue
+        assign(process, cfg.block_end_default)
 
     counts = {"minimize": 0, "hide": 0, "quit": 0}
     failed_quit: list[str] = []
@@ -333,8 +462,10 @@ def apply_block_end_actions(cfg: AppConfig) -> dict[str, int]:
             counts["quit"] += 1
         else:
             failed_quit.append(process)
+            if _applescript_hide_processes([process]) > 0:
+                counts["hide"] += 1
 
-    counts["hide"] = _applescript_hide_processes(to_hide)
+    counts["hide"] += _applescript_hide_processes(to_hide)
     counts["minimize"] = _applescript_minimize_processes(to_minimize)
 
     if failed_quit:
@@ -530,8 +661,10 @@ def _front_stop_modal(windows: list[StopBlockWindow]) -> None:
 
 def _close_stop_modal(windows: list[StopBlockWindow]) -> None:
     for window in windows:
+        window.setIgnoresMouseEvents_(True)
         window.orderOut_(None)
         window.close()
+    _pump_run_loop(0.02)
 
 
 def _shake_window_desc(cfg: AppConfig, total_sec: float) -> str:
@@ -546,7 +679,7 @@ def _shake_window_desc(cfg: AppConfig, total_sec: float) -> str:
 
 
 class CountdownView(AppKit.NSView):
-    def initWithFrame_redZone_(self, frame, red_zone: float):
+    def initWithFrame_redZone_strokeBase_(self, frame, red_zone: float, stroke_base):
         self = objc.super(CountdownView, self).initWithFrame_(frame)
         if self is None:
             return None
@@ -554,17 +687,15 @@ class CountdownView(AppKit.NSView):
         self.stroke_width = 2.0
         self.inset = 0.0
         self.red_zone = red_zone
-        self.stroke_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.2, 0.75, 1.0, 0.95)
-        self.label = ""
+        self.stroke_base = stroke_base
+        self.stroke_color = _stroke_color_for_fraction(1.0, red_zone, stroke_base)
         return self
 
     def setProgress_(self, fraction: float) -> None:
         self.remaining_fraction = max(0.0, min(1.0, fraction))
-        self.stroke_color = _stroke_color_for_fraction(self.remaining_fraction, self.red_zone)
-        self.setNeedsDisplay_(True)
-
-    def setLabel_(self, label: str) -> None:
-        self.label = label
+        self.stroke_color = _stroke_color_for_fraction(
+            self.remaining_fraction, self.red_zone, self.stroke_base
+        )
         self.setNeedsDisplay_(True)
 
     def isFlipped(self) -> bool:
@@ -577,27 +708,8 @@ class CountdownView(AppKit.NSView):
         inset = self.inset
         sw = self.stroke_width
         inner = NSMakeRect(inset, inset, w - 2 * inset, h - 2 * inset)
-
         if self.remaining_fraction > 0:
             self._stroke_perimeter(inner, self.remaining_fraction, self.stroke_color, sw)
-
-        if self.label:
-            attrs = {
-                AppKit.NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(
-                    14, AppKit.NSFontWeightMedium
-                ),
-                AppKit.NSForegroundColorAttributeName: NSColor.colorWithCalibratedWhite_alpha_(
-                    1.0, 0.95
-                ),
-            }
-            text = AppKit.NSAttributedString.alloc().initWithString_attributes_(
-                self.label, attrs
-            )
-            size = text.size()
-            margin = 16
-            text.drawAtPoint_(
-                AppKit.NSMakePoint(w - size.width - margin, h - size.height - margin)
-            )
 
     def _stroke_perimeter(self, rect, fraction: float, color, line_width: float) -> None:
         if fraction <= 0:
@@ -640,7 +752,7 @@ class CountdownView(AppKit.NSView):
 
 
 class CountdownWindow(AppKit.NSWindow):
-    def initWithScreen_redZone_(self, screen, red_zone: float):
+    def initWithScreen_redZone_strokeBase_(self, screen, red_zone: float, stroke_base):
         frame = screen.frame()
         self = objc.super(CountdownWindow, self).initWithContentRect_styleMask_backing_defer_(
             frame,
@@ -660,18 +772,135 @@ class CountdownWindow(AppKit.NSWindow):
             | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
             | AppKit.NSWindowCollectionBehaviorStationary
         )
-        view = CountdownView.alloc().initWithFrame_redZone_(
-            AppKit.NSMakeRect(0, 0, frame.size.width, frame.size.height), red_zone
+        view = CountdownView.alloc().initWithFrame_redZone_strokeBase_(
+            AppKit.NSMakeRect(0, 0, frame.size.width, frame.size.height),
+            red_zone,
+            stroke_base,
         )
         self.setContentView_(view)
         self._view = view
         return self
 
+    def canBecomeKeyWindow(self) -> bool:
+        return False
+
+    def canBecomeMainWindow(self) -> bool:
+        return False
+
     def setProgress_(self, fraction: float) -> None:
         self._view.setProgress_(fraction)
 
+
+class FinishControl(AppKit.NSView):
+    """Clickable Finish control — mouseDown/mouseUp like StopBlockView."""
+
+    def initWithFrame_handler_(self, frame, handler):
+        self = objc.super(FinishControl, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._handler = handler
+        self._pressed = False
+        return self
+
+    def acceptsFirstMouse_(self, _event) -> bool:
+        return True
+
+    def mouseDown_(self, _event) -> None:
+        self._pressed = True
+        self.setNeedsDisplay_(True)
+        if self._handler is not None:
+            self._handler()
+
+    def mouseUp_(self, event) -> None:
+        self._pressed = False
+        self.setNeedsDisplay_(True)
+
+    def drawRect_(self, _rect) -> None:
+        bounds = self.bounds()
+        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bounds, 5.0, 5.0)
+        if self._pressed:
+            NSColor.colorWithCalibratedWhite_alpha_(0.38, 0.92).set()
+        else:
+            NSColor.colorWithCalibratedWhite_alpha_(0.24, 0.88).set()
+        path.fill()
+        attrs = {
+            AppKit.NSFontAttributeName: NSFont.systemFontOfSize_weight_(12, AppKit.NSFontWeightMedium),
+            AppKit.NSForegroundColorAttributeName: NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.95),
+        }
+        text = AppKit.NSAttributedString.alloc().initWithString_attributes_("Finish", attrs)
+        size = text.size()
+        text.drawAtPoint_(
+            AppKit.NSMakePoint(
+                (bounds.size.width - size.width) / 2,
+                (bounds.size.height - size.height) / 2,
+            )
+        )
+
+    def setHidden_(self, hidden: bool) -> None:
+        objc.super(FinishControl, self).setHidden_(hidden)
+
+
+class CountdownHUDWindow(AppKit.NSWindow):
+    """Small click-target for timer label + Finish — stroke overlay stays click-through."""
+
+    def initWithScreen_finishHandler_(self, screen, finish_handler):
+        sf = screen.frame()
+        hud_w = 250.0
+        hud_h = 32.0
+        x = sf.origin.x + sf.size.width - hud_w - 16.0
+        y = sf.origin.y + 16.0
+        frame = AppKit.NSMakeRect(x, y, hud_w, hud_h)
+        self = objc.super(CountdownHUDWindow, self).initWithContentRect_styleMask_backing_defer_(
+            frame,
+            AppKit.NSWindowStyleMaskBorderless,
+            AppKit.NSBackingStoreBuffered,
+            False,
+        )
+        if self is None:
+            return None
+        self.setLevel_(AppKit.NSStatusWindowLevel + 3)
+        self.setOpaque_(False)
+        self.setBackgroundColor_(NSColor.clearColor())
+        self.setIgnoresMouseEvents_(False)
+        self.setHasShadow_(False)
+        self.setCollectionBehavior_(
+            AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+            | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
+            | AppKit.NSWindowCollectionBehaviorStationary
+        )
+        btn_w = 64.0
+        btn_h = 24.0
+        self._label = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(0, 4, hud_w - btn_w - 8, hud_h - 8)
+        )
+        self._label.setBezeled_(False)
+        self._label.setDrawsBackground_(False)
+        self._label.setEditable_(False)
+        self._label.setSelectable_(False)
+        self._label.setAlignment_(AppKit.NSTextAlignmentRight)
+        self._label.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(13, AppKit.NSFontWeightMedium))
+        self._label.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.95))
+        self._finish_btn = FinishControl.alloc().initWithFrame_handler_(
+            AppKit.NSMakeRect(hud_w - btn_w, (hud_h - btn_h) / 2, btn_w, btn_h),
+            finish_handler,
+        )
+        content = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, hud_w, hud_h))
+        content.addSubview_(self._label)
+        content.addSubview_(self._finish_btn)
+        self.setContentView_(content)
+        return self
+
+    def canBecomeKeyWindow(self) -> bool:
+        return False
+
+    def canBecomeMainWindow(self) -> bool:
+        return False
+
     def setLabel_(self, label: str) -> None:
-        self._view.setLabel_(label)
+        self._label.setStringValue_(label)
+
+    def setFinishHidden_(self, hidden: bool) -> None:
+        self._finish_btn.setHidden_(hidden)
 
 
 class FocusShaker:
@@ -816,12 +1045,29 @@ class _TimerBridge(AppKit.NSObject):
 
 
 class CountdownApp:
-    def __init__(self, target: dt.datetime, cfg: AppConfig) -> None:
+    def __init__(
+        self,
+        target: dt.datetime,
+        cfg: AppConfig,
+        *,
+        watch_mode: bool = False,
+        is_calendar: bool = False,
+        event_start: dt.datetime | None = None,
+        event_id: str | None = None,
+        event_title: str | None = None,
+    ) -> None:
         self.target = target
         self.cfg = cfg
+        self.watch_mode = watch_mode
+        self.is_calendar = is_calendar
+        self.event_start = event_start
+        self.event_id = event_id
+        self.event_title = event_title
         self.started = dt.datetime.now()
         self.total_seconds = max(1.0, (target - self.started).total_seconds())
+        self.stroke_base = calendar_stroke_base(cfg) if is_calendar else STROKE_BLUE
         self.windows: list[CountdownWindow] = []
+        self.hud_windows: list[CountdownHUDWindow] = []
         self._done = False
         self._interrupted = False
         self._blocked = False
@@ -835,19 +1081,64 @@ class CountdownApp:
         self._stop_controller = None
         self._stop_windows: list[StopBlockWindow] = []
         self._stop_click_down = False
+        self._finish_click_down = False
         self._minimize_after_dismiss = False
+        self._setup_complete = False
+        self._restore_focus_pid: int | None = None
 
-    def run(self) -> bool:
-        AppKit.NSApplication.sharedApplication()
-        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-        signal.signal(signal.SIGINT, self._handle_sigint)
+    def retarget(
+        self,
+        new_target: dt.datetime,
+        *,
+        reason: str = "",
+        event_start: dt.datetime | None = None,
+    ) -> None:
+        now = dt.datetime.now()
+        if new_target <= now:
+            return
+        if event_start is not None:
+            self.event_start = event_start
+        self.target = new_target
+        new_total = (new_target - self.started).total_seconds()
+        if new_total > self.total_seconds:
+            self.total_seconds = max(1.0, new_total)
+            self._shaker.set_total_seconds(self.total_seconds)
+        label = reason or "calendar event"
+        if self.is_calendar and self.event_start is not None:
+            print(
+                f"Calendar → cleanup {new_target.strftime('%H:%M')} "
+                f"(event {self.event_start.strftime('%H:%M')}, {label})",
+                flush=True,
+            )
+        else:
+            print(
+                f"Calendar → {new_target.strftime('%H:%M')} ({label})",
+                flush=True,
+            )
 
+    def finish_early(self) -> None:
+        if self._done or self._stop_modal_active:
+            return
+        if self.cfg.block_on_end:
+            self._enter_stop_modal()
+        else:
+            self._done = True
+
+    def setup(self) -> None:
+        if self._setup_complete:
+            return
+        _prepare_for_session_ui()
+        handler = lambda: self.finish_early()
         for screen in AppKit.NSScreen.screens():
-            window = CountdownWindow.alloc().initWithScreen_redZone_(screen, self.cfg.red_zone_fraction)
+            window = CountdownWindow.alloc().initWithScreen_redZone_strokeBase_(
+                screen, self.cfg.red_zone_fraction, self.stroke_base
+            )
             window._view.stroke_width = self.cfg.stroke_width
-            window.orderFrontRegardless()
+            window.orderFront_(None)
             self.windows.append(window)
-
+            hud = CountdownHUDWindow.alloc().initWithScreen_finishHandler_(screen, handler)
+            hud.orderFront_(None)
+            self.hud_windows.append(hud)
         self._tick()
         self._timer_bridge = _TimerBridge.alloc().initWithHandler_(self._on_tick)
         self._timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -856,20 +1147,60 @@ class CountdownApp:
         AppKit.NSRunLoop.currentRunLoop().addTimer_forMode_(
             self._timer, AppKit.NSRunLoopCommonModes
         )
+        self._setup_complete = True
 
+    def _poll_finish_click(self) -> None:
+        """Detect Finish clicks on the main thread without NSEvent global monitors."""
+        if self._done or self._stop_modal_active or not self.hud_windows:
+            return
+        if not (AppKit.NSEvent.pressedMouseButtons() & 1):
+            self._finish_click_down = False
+            return
+        if self._finish_click_down:
+            return
+        self._finish_click_down = True
+        point = _mouse_location_cocoa()
+        if point is None:
+            return
+        for hud in self.hud_windows:
+            if not hud.isVisible() or hud._finish_btn.isHidden():
+                continue
+            btn_rect = _finish_button_screen_rect(hud)
+            if AppKit.NSMouseInRect(point, btn_rect, False):
+                self.finish_early()
+                return
+
+    def pump_frame(self) -> bool:
+        """Run one run-loop slice. Returns False when countdown is finished."""
+        if self._minimize_after_dismiss:
+            self._minimize_after_dismiss = False
+            self._minimize_apps_after_block()
+        if self._stop_modal_active:
+            self._poll_stop_modal_click()
+            if self._stop_controller is not None and (
+                self._interrupted or self._stop_controller.dismissed
+            ):
+                self._dismiss_stop_modal()
+        else:
+            self._poll_finish_click()
+        _pump_run_loop(FRAME_INTERVAL)
+        return not self._done
+
+    def run(self) -> bool:
+        AppKit.NSApplication.sharedApplication()
+        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        signal.signal(signal.SIGINT, self._handle_sigint)
+        self.setup()
         while not self._done:
-            _pump_run_loop(FRAME_INTERVAL)
-            if self._minimize_after_dismiss:
-                self._minimize_after_dismiss = False
-                self._minimize_apps_after_block()
-            if self._stop_modal_active:
-                self._poll_stop_modal_click()
-            if self._stop_modal_active and self._stop_controller is not None:
-                if self._interrupted or self._stop_controller.dismissed:
-                    self._dismiss_stop_modal()
-
+            if not self.pump_frame():
+                break
         self._teardown()
         return self._interrupted
+
+    def stop(self) -> None:
+        self._interrupted = True
+        self._done = True
+        self._teardown()
 
     def _handle_sigint(self, _signum, _frame) -> None:
         self._interrupted = True
@@ -877,16 +1208,27 @@ class CountdownApp:
             self._done = True
 
     def _teardown(self) -> None:
+        if not self._setup_complete and not self.windows and not self.hud_windows:
+            return
         self._shaker.restore()
+        if self._timer is not None:
+            self._timer.invalidate()
+            self._timer = None
         if self._stop_controller is not None:
             self._stop_controller.remove_input_monitor()
         _close_stop_modal(self._stop_windows)
         self._stop_windows.clear()
         self._stop_controller = None
+        self._stop_modal_active = False
         for window in self.windows:
             window.orderOut_(None)
             window.close()
         self.windows.clear()
+        for hud in self.hud_windows:
+            hud.orderOut_(None)
+            hud.close()
+        self.hud_windows.clear()
+        self._setup_complete = False
 
     def _on_tick(self) -> None:
         if self._stop_modal_active:
@@ -901,6 +1243,7 @@ class CountdownApp:
     def _enter_stop_modal(self) -> None:
         if self._blocked:
             return
+        self._restore_focus_pid = _frontmost_pid()
         self._blocked = True
         self._stop_modal_active = True
         if self._timer is not None:
@@ -909,13 +1252,15 @@ class CountdownApp:
         self._shaker.restore()
         for window in self.windows:
             window.orderOut_(None)
+        for hud in self.hud_windows:
+            hud.orderOut_(None)
+            hud.setFinishHidden_(True)
         self._stop_controller = _StopModalController.alloc().init()
         self._stop_windows = [
             StopBlockWindow.alloc().initWithScreen_controller_(screen, self._stop_controller)
             for screen in AppKit.NSScreen.screens()
         ]
         _front_stop_modal(self._stop_windows)
-        self._stop_controller.install_input_monitor()
 
     def _poll_stop_modal_click(self) -> None:
         if self._stop_controller is None or not self._stop_controller.can_dismiss():
@@ -934,7 +1279,15 @@ class CountdownApp:
         self._stop_windows.clear()
         self._stop_controller = None
         self._stop_modal_active = False
-        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        for window in self.windows:
+            window.orderOut_(None)
+            window.close()
+        self.windows.clear()
+        for hud in self.hud_windows:
+            hud.orderOut_(None)
+            hud.close()
+        self.hud_windows.clear()
+        _set_watcher_idle_policy()
         _pump_run_loop(0.05)
         self._minimize_after_dismiss = True
 
@@ -942,7 +1295,21 @@ class CountdownApp:
         summary = _format_block_end_summary(apply_block_end_actions(self.cfg))
         if summary:
             print(summary, flush=True)
+        if self.watch_mode:
+            print("Session ended — watcher ready (type 15 or q).", flush=True)
+        restored = (
+            _should_restore_focus_pid(self._restore_focus_pid, self.cfg)
+            and _activate_pid(self._restore_focus_pid)
+        )
+        if not restored:
+            _activate_finder()
         self._done = True
+
+    def _hud_label(self, remaining: float) -> str:
+        text = format_duration(remaining)
+        if self.is_calendar and self.event_start is not None:
+            text = f"{text} · {self.event_start.strftime('%H:%M')}"
+        return text
 
     def _tick(self) -> None:
         now = dt.datetime.now()
@@ -953,11 +1320,267 @@ class CountdownApp:
         self._display_fraction = _lerp(
             self._display_fraction, target_fraction, dt_seconds, DISPLAY_SMOOTH_RATE
         )
-        label = format_duration(remaining)
+        label = self._hud_label(remaining)
         for window in self.windows:
             window.setProgress_(self._display_fraction)
-            window.setLabel_(label)
+        for hud in self.hud_windows:
+            hud.setLabel_(label)
         self._shaker.update(remaining, dt_seconds)
+
+
+def _enable_stdin_nonblocking() -> None:
+    fd = sys.stdin.fileno()
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+
+def _read_stdin_chunk() -> str | None:
+    try:
+        if not select.select([sys.stdin], [], [], 0)[0]:
+            return None
+        return sys.stdin.read()
+    except (BlockingIOError, OSError):
+        return None
+
+
+class Watcher:
+    def __init__(self, cfg: AppConfig) -> None:
+        self.cfg = cfg
+        self.countdown: CountdownApp | None = None
+        self.calendar = CalendarMonitor(cfg) if CalendarMonitor is not None else None
+        self._quit = False
+        self._stdin_buf = ""
+        self._last_cal_poll = 0.0
+        self._finished_calendar_events: set[str] = set()
+
+    def run(self) -> int:
+        AppKit.NSApplication.sharedApplication()
+        _set_watcher_idle_policy()
+        signal.signal(signal.SIGINT, self._handle_sigint)
+        _enable_stdin_nonblocking()
+
+        if self.cfg.calendar_enabled and self.calendar is not None:
+            self.calendar.ensure_access()
+            if not self._start_from_nearest_event():
+                print("Calendar: no accepted event in the next window.", flush=True)
+
+        print("Watcher ready — enter 15, 14:00, or q to quit.", flush=True)
+        if self.cfg.calendar_enabled:
+            print(
+                f"Calendar: auto-start within {self.cfg.calendar_window_minutes:.0f}m; "
+                "snap while running.",
+                flush=True,
+            )
+        if self.cfg.block_on_end:
+            print("Block on end: stop overlay — dismiss to tidy windows.", flush=True)
+
+        while not self._quit:
+            self._poll_stdin()
+            self._poll_calendar()
+            if self.countdown is not None:
+                if not self.countdown.pump_frame():
+                    if (
+                        self.countdown._blocked
+                        and not self.countdown._interrupted
+                        and not self.countdown.watch_mode
+                    ):
+                        print("\nIt's time to stop.", flush=True)
+                    self.countdown._teardown()
+                    if (
+                        self.countdown.is_calendar
+                        and self.countdown.event_id
+                        and self.countdown._blocked
+                        and not self.countdown._interrupted
+                    ):
+                        self._finished_calendar_events.add(self.countdown.event_id)
+                    self.countdown = None
+                    _set_watcher_idle_policy()
+            else:
+                _pump_run_loop(FRAME_INTERVAL)
+
+        if self.countdown is not None:
+            self.countdown.stop()
+        return 0
+
+    def _handle_sigint(self, _signum, _frame) -> None:
+        self._quit = True
+        if self.countdown is not None:
+            self.countdown._interrupted = True
+            self.countdown._done = True
+
+    def _poll_stdin(self) -> None:
+        chunk = _read_stdin_chunk()
+        if chunk is None:
+            return
+        if chunk == "":
+            self._quit = True
+            return
+        self._stdin_buf += chunk
+        while "\n" in self._stdin_buf or "\r" in self._stdin_buf:
+            line, sep, rest = self._stdin_buf.partition("\n")
+            if not sep:
+                line, sep, rest = self._stdin_buf.partition("\r")
+            self._stdin_buf = rest
+            line = line.strip()
+            if line:
+                self._handle_line(line)
+
+    def _handle_line(self, line: str) -> None:
+        if line.lower() in {"q", "quit", "exit"}:
+            self._quit = True
+            return
+        try:
+            target = parse_quick_input(line)
+        except ValueError as exc:
+            print(exc, file=sys.stderr, flush=True)
+            return
+        remaining = (target - dt.datetime.now()).total_seconds()
+        if remaining <= 0:
+            print("Target time is already in the past.", file=sys.stderr, flush=True)
+            return
+        if self.countdown is not None:
+            self.countdown.stop()
+            self.countdown = None
+        self._start_countdown_at(target)
+        self._sync_calendar_to_nearest()
+
+    def _start_countdown_at(
+        self,
+        target: dt.datetime,
+        reason: str | None = None,
+        *,
+        is_calendar: bool = False,
+        event_start: dt.datetime | None = None,
+        event_id: str | None = None,
+    ) -> None:
+        remaining = (target - dt.datetime.now()).total_seconds()
+        if remaining <= 0:
+            return
+        suffix = f" [{reason}]" if reason else ""
+        if is_calendar and event_start is not None:
+            print(
+                f"Countdown → cleanup {target.strftime('%H:%M:%S')} "
+                f"(event {event_start.strftime('%H:%M')}, "
+                f"{format_duration(remaining)} remaining){suffix}",
+                flush=True,
+            )
+        else:
+            print(
+                f"Countdown → {target.strftime('%H:%M:%S')} "
+                f"({format_duration(remaining)} remaining){suffix}",
+                flush=True,
+            )
+        self.countdown = CountdownApp(
+            target,
+            self.cfg,
+            watch_mode=True,
+            is_calendar=is_calendar,
+            event_start=event_start,
+            event_id=event_id,
+            event_title=reason,
+        )
+        self.countdown.setup()
+
+    def _calendar_block_at(self, event_start: dt.datetime) -> dt.datetime | None:
+        return calendar_block_target(event_start, self.cfg)
+
+    def _calendar_event_pending(self, event) -> bool:
+        if event.event_id in self._finished_calendar_events:
+            if dt.datetime.now() >= event.start:
+                self._finished_calendar_events.discard(event.event_id)
+            else:
+                return False
+        return self._calendar_block_at(event.start) is not None
+
+    def _start_from_nearest_event(self) -> bool:
+        if self.calendar is None or not self.cfg.calendar_enabled or self.countdown is not None:
+            return False
+        event = self.calendar.nearest_event_within()
+        if event is None or not self._calendar_event_pending(event):
+            return False
+        block_at = self._calendar_block_at(event.start)
+        if block_at is None:
+            return False
+        self._start_countdown_at(
+            block_at,
+            reason=event.title,
+            is_calendar=True,
+            event_start=event.start,
+            event_id=event.event_id,
+        )
+        return True
+
+    def _sync_calendar_to_nearest(self) -> None:
+        if self.calendar is None or not self.cfg.calendar_enabled or self.countdown is None:
+            return
+        event = self.calendar.nearest_event_within()
+        if event is None or not self._calendar_event_pending(event):
+            return
+        block_at = self._calendar_block_at(event.start)
+        if block_at is None:
+            return
+        delta = abs((self.countdown.target - block_at).total_seconds())
+        if delta > 1.0:
+            self.countdown.is_calendar = True
+            self.countdown.event_id = event.event_id
+            self.countdown.event_title = event.title
+            self.countdown.stroke_base = calendar_stroke_base(self.cfg)
+            for window in self.countdown.windows:
+                window._view.stroke_base = self.countdown.stroke_base
+            self.countdown.retarget(
+                block_at, reason=event.title, event_start=event.start
+            )
+
+    def _poll_calendar(self) -> None:
+        if self.calendar is None or not self.cfg.calendar_enabled:
+            return
+        now = time.monotonic()
+        if now - self._last_cal_poll < self.cfg.calendar_poll_seconds:
+            return
+        self._last_cal_poll = now
+        if self.countdown is None or self.countdown._done:
+            self._start_from_nearest_event()
+            return
+        event = self.calendar.nearest_event_within()
+        if event is None or not self._calendar_event_pending(event):
+            return
+        block_at = self._calendar_block_at(event.start)
+        if block_at is None:
+            return
+        delta = abs((self.countdown.target - block_at).total_seconds())
+        if delta > 1.0:
+            self.countdown.is_calendar = True
+            self.countdown.event_id = event.event_id
+            self.countdown.event_title = event.title
+            self.countdown.stroke_base = calendar_stroke_base(self.cfg)
+            for window in self.countdown.windows:
+                window._view.stroke_base = self.countdown.stroke_base
+            self.countdown.retarget(
+                block_at, reason=event.title, event_start=event.start
+            )
+
+
+def _print_countdown_banner(cfg: AppConfig, target: dt.datetime, remaining: float) -> None:
+    print(
+        f"Countdown → {target.strftime('%H:%M:%S')} ({format_duration(remaining)} remaining)",
+        flush=True,
+    )
+    print(f"Shake: {_shake_window_desc(cfg, remaining)}", flush=True)
+    if not _HAS_ACCESSIBILITY:
+        print("Warning: shake needs pyobjc-framework-ApplicationServices.", file=sys.stderr, flush=True)
+    else:
+        print("Shake: frontmost app window.", flush=True)
+    if cfg.block_on_end:
+        print("Block on end: stop overlay — dismiss to tidy windows (see BLOCK_END_* in .env).", flush=True)
+    print("Ctrl+C to quit.", flush=True)
+
+
+def _main_watch(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Watch mode — quick-add countdown timers.")
+    _add_config_args(parser)
+    args = parser.parse_args(argv)
+    cfg = _cli_to_config(args)
+    return Watcher(cfg).run()
 
 
 def _add_config_args(parser: argparse.ArgumentParser) -> None:
@@ -1003,9 +1626,9 @@ def _cli_to_config(args: argparse.Namespace) -> AppConfig:
     )
 
 
-def main() -> int:
+def _main_countdown(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Screen-edge countdown (macOS).")
-    parser.add_argument("time", nargs="?", help="Target clock time, e.g. 6:00, 18:00")
+    parser.add_argument("time", nargs="?", help="Minutes (15), clock time (6:00), or --for-minutes")
     parser.add_argument("--at", dest="at", metavar="HH:MM", help="Target time (flag form)")
     parser.add_argument(
         "--for-minutes",
@@ -1015,7 +1638,7 @@ def main() -> int:
         help="Count down N minutes from now (instead of clock time)",
     )
     _add_config_args(parser)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     cfg = _cli_to_config(args)
 
     if args.for_minutes is not None:
@@ -1025,9 +1648,9 @@ def main() -> int:
     else:
         raw = args.time or args.at
         if not raw:
-            parser.error("Provide a target time or --for-minutes")
+            parser.error("Provide a target time, --for-minutes, or use: ./run watch")
         try:
-            target = parse_target_time(raw)
+            target = parse_quick_input(raw)
         except ValueError as exc:
             print(exc, file=sys.stderr)
             return 1
@@ -1037,20 +1660,7 @@ def main() -> int:
         print("Target time is already in the past.", file=sys.stderr)
         return 1
 
-    total = remaining
-    print(
-        f"Countdown → {target.strftime('%H:%M:%S')} ({format_duration(remaining)} remaining)",
-        flush=True,
-    )
-    print(f"Shake: {_shake_window_desc(cfg, total)}", flush=True)
-    if not _HAS_ACCESSIBILITY:
-        print("Warning: shake needs pyobjc-framework-ApplicationServices.", file=sys.stderr, flush=True)
-    else:
-        print("Shake: frontmost app window.", flush=True)
-    if cfg.block_on_end:
-        print("Block on end: stop overlay — dismiss to tidy windows (see BLOCK_END_* in .env).", flush=True)
-    print("Ctrl+C to quit.", flush=True)
-
+    _print_countdown_banner(cfg, target, remaining)
     app = CountdownApp(target, cfg)
     if app.run():
         print("\nStopped.", flush=True)
@@ -1061,6 +1671,13 @@ def main() -> int:
         return 0
     print(f"\nDone — {target.strftime('%H:%M')} reached.", flush=True)
     return 0
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "watch":
+        return _main_watch(argv[1:])
+    return _main_countdown(argv)
 
 
 if __name__ == "__main__":

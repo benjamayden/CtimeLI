@@ -85,6 +85,13 @@ class AppConfig:
     block_end_hide: frozenset[str] = frozenset()
     block_end_quit: frozenset[str] = frozenset()
     block_end_skip: frozenset[str] = frozenset()
+    calendar_enabled: bool = True
+    calendar_poll_seconds: float = 15.0
+    calendar_window_minutes: float = 10.0
+    calendar_block_before_mins: float = 7.0
+    calendar_stroke_r: float = 0.3
+    calendar_stroke_g: float = 0.85
+    calendar_stroke_b: float = 0.45
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -109,6 +116,13 @@ class AppConfig:
             block_end_hide=_env_csv("BLOCK_END_HIDE"),
             block_end_quit=_env_csv("BLOCK_END_QUIT"),
             block_end_skip=_env_csv("BLOCK_END_SKIP"),
+            calendar_enabled=_env_bool("CALENDAR_ENABLED", True),
+            calendar_poll_seconds=_env_float("CALENDAR_POLL_SECONDS", 15.0),
+            calendar_window_minutes=_env_float("CALENDAR_WINDOW_MINUTES", 10.0),
+            calendar_block_before_mins=_env_float("CALENDAR_BLOCK_BEFORE_MINS", 7.0),
+            calendar_stroke_r=_env_float("CALENDAR_STROKE_R", 0.3),
+            calendar_stroke_g=_env_float("CALENDAR_STROKE_G", 0.85),
+            calendar_stroke_b=_env_float("CALENDAR_STROKE_B", 0.45),
         )
 
     def merge_cli(self, **overrides) -> AppConfig:
