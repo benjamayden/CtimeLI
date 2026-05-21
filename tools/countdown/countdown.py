@@ -28,7 +28,7 @@ import AppKit
 import objc
 from Cocoa import NSBezierPath, NSColor, NSFont, NSMakeRect
 
-from config import AppConfig, shake_intensity
+from config import AppConfig, pulse_opacity, pulse_spread, shake_intensity
 from input_parse import parse_quick_input
 
 try:
@@ -667,15 +667,163 @@ def _close_stop_modal(windows: list[StopBlockWindow]) -> None:
     _pump_run_loop(0.02)
 
 
-def _shake_window_desc(cfg: AppConfig, total_sec: float) -> str:
-    before = cfg.shake_before_mins * 60
-    if total_sec < before:
-        start = total_sec * cfg.shake_start_fraction
-        return f"last {cfg.shake_start_fraction:.0%} ({format_duration(start)}), nudge {cfg.shake_nudge_seconds:.0f}s"
+def _alert_window_desc(cfg: AppConfig) -> str:
+    pulse = format_duration(cfg.pulse_before_secs)
+    wiggle = f"{cfg.shake_wiggle_seconds:.0f}s"
+    ramp = "linear" if cfg.pulse_ramp_power == 1.0 else f"power {cfg.pulse_ramp_power:g}"
+    op_ramp = format_duration(cfg.pulse_opacity_ramp_secs)
     return (
-        f"last {cfg.shake_before_mins:.0f}m, nudge {cfg.shake_nudge_seconds:.0f}s, "
-        f"calm final {cfg.shake_stop_before_mins:.0f}m"
+        f"edge pulse last {pulse} (opacity in {op_ramp}, {ramp} spread), "
+        f"window wiggle last {wiggle} only"
     )
+
+
+def _stroke_rgb(color) -> tuple[float, float, float]:
+    rgb = color.colorUsingColorSpace_(AppKit.NSColorSpace.genericRGBColorSpace())
+    if rgb is None:
+        return STROKE_BLUE
+    return float(rgb.redComponent()), float(rgb.greenComponent()), float(rgb.blueComponent())
+
+
+def _stroke_perimeter(rect, fraction: float, color, line_width: float) -> None:
+    if fraction <= 0:
+        return
+    x = rect.origin.x
+    y = rect.origin.y
+    w = rect.size.width
+    h = rect.size.height
+    perimeter = 2 * (w + h)
+    length = fraction * perimeter
+    color.set()
+    path = NSBezierPath.bezierPath()
+    path.setLineWidth_(line_width)
+    path.setLineCapStyle_(AppKit.NSLineCapStyleButt)
+    path.setLineJoinStyle_(AppKit.NSLineJoinStyleMiter)
+    segments = [
+        ((x, y), (x + w, y)),
+        ((x + w, y), (x + w, y + h)),
+        ((x + w, y + h), (x, y + h)),
+        ((x, y + h), (x, y)),
+    ]
+    remaining = length
+    path.moveToPoint_(segments[0][0])
+    for (start, end) in segments:
+        seg_len = abs(end[0] - start[0]) + abs(end[1] - start[1])
+        if remaining <= 0:
+            break
+        if remaining >= seg_len:
+            path.lineToPoint_(end)
+            remaining -= seg_len
+        else:
+            t = remaining / seg_len if seg_len else 0
+            partial = (
+                start[0] + t * (end[0] - start[0]),
+                start[1] + t * (end[1] - start[1]),
+            )
+            path.lineToPoint_(partial)
+            remaining = 0
+    path.stroke()
+
+
+def _draw_soft_gradient_strip(
+    rx: float,
+    ry: float,
+    rw: float,
+    rh: float,
+    r: float,
+    g: float,
+    b: float,
+    peak_alpha: float,
+    direction: str,
+) -> None:
+    """Soft edge glow using stacked fills — avoids NSGradient (crashes on Py3.14)."""
+    bands = 7
+    band_h = rh / bands
+    band_w = rw / bands
+    for i in range(bands):
+        fade = (1.0 - (i + 0.5) / bands) ** 1.4
+        alpha = peak_alpha * fade
+        if alpha < 0.004:
+            continue
+        NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha).setFill()
+        if direction == "down":
+            NSBezierPath.fillRect_(NSMakeRect(rx, ry + band_h * i, rw, band_h + 0.5))
+        elif direction == "up":
+            NSBezierPath.fillRect_(NSMakeRect(rx, ry + rh - band_h * (i + 1), rw, band_h + 0.5))
+        elif direction == "right":
+            NSBezierPath.fillRect_(NSMakeRect(rx + band_w * i, ry, band_w + 0.5, rh))
+        else:
+            NSBezierPath.fillRect_(NSMakeRect(rx + rw - band_w * (i + 1), ry, band_w + 0.5, rh))
+
+
+def _draw_edge_pulse(
+    rect,
+    color,
+    opacity: float,
+    spread: float,
+    phase: float,
+    *,
+    depth_min: float,
+    depth_max: float,
+    max_opacity: float,
+    visual_power: float = 1.0,
+) -> None:
+    if opacity < 0.02 and spread < 0.01:
+        return
+    spread_vis = spread ** max(0.1, visual_power)
+    depth = depth_min + (depth_max - depth_min) * spread_vis
+    if depth < 1.0 and opacity < 0.02:
+        return
+
+    r, g, b = _stroke_rgb(color)
+    x = rect.origin.x
+    y = rect.origin.y
+    w = rect.size.width
+    h = rect.size.height
+    segments = 16
+    step = 1.0 / segments
+    overlap = 3.0
+
+    edges = (
+        ("bottom", 0.0),
+        ("right", math.pi * 0.5),
+        ("top", math.pi),
+        ("left", math.pi * 1.5),
+    )
+    for edge_name, edge_phase in edges:
+        for i in range(segments):
+            t = (i + 0.5) * step
+            flow = 0.54 + 0.46 * math.sin(
+                phase * 0.75 + edge_phase + t * math.pi * 2.0 * 1.35
+            )
+            band = opacity * flow
+            if band < 0.014:
+                continue
+            alpha = min(max_opacity, band * 0.95)
+            if edge_name == "bottom":
+                sx = x + t * w
+                sw = w * step + overlap
+                _draw_soft_gradient_strip(
+                    sx - sw / 2, y + h - depth, sw, depth, r, g, b, alpha, "up"
+                )
+            elif edge_name == "top":
+                sx = x + t * w
+                sw = w * step + overlap
+                _draw_soft_gradient_strip(
+                    sx - sw / 2, y, sw, depth, r, g, b, alpha, "down"
+                )
+            elif edge_name == "right":
+                sy = y + t * h
+                sh = h * step + overlap
+                _draw_soft_gradient_strip(
+                    x + w - depth, sy - sh / 2, depth, sh, r, g, b, alpha, "left"
+                )
+            else:
+                sy = y + t * h
+                sh = h * step + overlap
+                _draw_soft_gradient_strip(
+                    x, sy - sh / 2, depth, sh, r, g, b, alpha, "right"
+                )
 
 
 class CountdownView(AppKit.NSView):
@@ -689,6 +837,13 @@ class CountdownView(AppKit.NSView):
         self.red_zone = red_zone
         self.stroke_base = stroke_base
         self.stroke_color = _stroke_color_for_fraction(1.0, red_zone, stroke_base)
+        self.pulse_opacity = 0.0
+        self.pulse_spread = 0.0
+        self.pulse_phase = 0.0
+        self.pulse_depth_min = 10.0
+        self.pulse_depth_max = 110.0
+        self.pulse_max_opacity = 0.85
+        self.pulse_visual_power = 1.0
         return self
 
     def setProgress_(self, fraction: float) -> None:
@@ -696,6 +851,12 @@ class CountdownView(AppKit.NSView):
         self.stroke_color = _stroke_color_for_fraction(
             self.remaining_fraction, self.red_zone, self.stroke_base
         )
+        self.setNeedsDisplay_(True)
+
+    def setPulseOpacity_spread_phase_(self, opacity: float, spread: float, phase: float) -> None:
+        self.pulse_opacity = max(0.0, min(1.0, opacity))
+        self.pulse_spread = max(0.0, min(1.0, spread))
+        self.pulse_phase = phase
         self.setNeedsDisplay_(True)
 
     def isFlipped(self) -> bool:
@@ -708,47 +869,20 @@ class CountdownView(AppKit.NSView):
         inset = self.inset
         sw = self.stroke_width
         inner = NSMakeRect(inset, inset, w - 2 * inset, h - 2 * inset)
+        if self.pulse_opacity >= 0.02 or self.pulse_spread >= 0.01:
+            _draw_edge_pulse(
+                inner,
+                self.stroke_color,
+                self.pulse_opacity,
+                self.pulse_spread,
+                self.pulse_phase,
+                depth_min=self.pulse_depth_min,
+                depth_max=self.pulse_depth_max,
+                max_opacity=self.pulse_max_opacity,
+                visual_power=self.pulse_visual_power,
+            )
         if self.remaining_fraction > 0:
-            self._stroke_perimeter(inner, self.remaining_fraction, self.stroke_color, sw)
-
-    def _stroke_perimeter(self, rect, fraction: float, color, line_width: float) -> None:
-        if fraction <= 0:
-            return
-        x = rect.origin.x
-        y = rect.origin.y
-        w = rect.size.width
-        h = rect.size.height
-        perimeter = 2 * (w + h)
-        length = fraction * perimeter
-        color.set()
-        path = NSBezierPath.bezierPath()
-        path.setLineWidth_(line_width)
-        path.setLineCapStyle_(AppKit.NSLineCapStyleButt)
-        path.setLineJoinStyle_(AppKit.NSLineJoinStyleMiter)
-        segments = [
-            ((x, y), (x + w, y)),
-            ((x + w, y), (x + w, y + h)),
-            ((x + w, y + h), (x, y + h)),
-            ((x, y + h), (x, y)),
-        ]
-        remaining = length
-        path.moveToPoint_(segments[0][0])
-        for (start, end) in segments:
-            seg_len = abs(end[0] - start[0]) + abs(end[1] - start[1])
-            if remaining <= 0:
-                break
-            if remaining >= seg_len:
-                path.lineToPoint_(end)
-                remaining -= seg_len
-            else:
-                t = remaining / seg_len if seg_len else 0
-                partial = (
-                    start[0] + t * (end[0] - start[0]),
-                    start[1] + t * (end[1] - start[1]),
-                )
-                path.lineToPoint_(partial)
-                remaining = 0
-        path.stroke()
+            _stroke_perimeter(inner, self.remaining_fraction, self.stroke_color, sw)
 
 
 class CountdownWindow(AppKit.NSWindow):
@@ -789,6 +923,9 @@ class CountdownWindow(AppKit.NSWindow):
 
     def setProgress_(self, fraction: float) -> None:
         self._view.setProgress_(fraction)
+
+    def setPulseOpacity_spread_phase_(self, opacity: float, spread: float, phase: float) -> None:
+        self._view.setPulseOpacity_spread_phase_(opacity, spread, phase)
 
 
 class FinishControl(AppKit.NSView):
@@ -1074,6 +1211,7 @@ class CountdownApp:
         self._shaker = FocusShaker(cfg)
         self._shaker.set_total_seconds(self.total_seconds)
         self._display_fraction = 1.0
+        self._pulse_phase = 0.0
         self._last_frame = dt.datetime.now()
         self._timer = None
         self._timer_bridge = None
@@ -1134,6 +1272,10 @@ class CountdownApp:
                 screen, self.cfg.red_zone_fraction, self.stroke_base
             )
             window._view.stroke_width = self.cfg.stroke_width
+            window._view.pulse_depth_min = self.cfg.pulse_depth_min
+            window._view.pulse_depth_max = self.cfg.pulse_depth_max
+            window._view.pulse_max_opacity = self.cfg.pulse_max_opacity
+            window._view.pulse_visual_power = self.cfg.pulse_visual_power
             window.orderFront_(None)
             self.windows.append(window)
             hud = CountdownHUDWindow.alloc().initWithScreen_finishHandler_(screen, handler)
@@ -1321,8 +1463,12 @@ class CountdownApp:
             self._display_fraction, target_fraction, dt_seconds, DISPLAY_SMOOTH_RATE
         )
         label = self._hud_label(remaining)
+        opacity = pulse_opacity(remaining, self.cfg)
+        spread = pulse_spread(remaining, self.cfg)
+        self._pulse_phase += dt_seconds * 0.85
         for window in self.windows:
             window.setProgress_(self._display_fraction)
+            window.setPulseOpacity_spread_phase_(opacity, spread, self._pulse_phase)
         for hud in self.hud_windows:
             hud.setLabel_(label)
         self._shaker.update(remaining, dt_seconds)
@@ -1565,11 +1711,11 @@ def _print_countdown_banner(cfg: AppConfig, target: dt.datetime, remaining: floa
         f"Countdown → {target.strftime('%H:%M:%S')} ({format_duration(remaining)} remaining)",
         flush=True,
     )
-    print(f"Shake: {_shake_window_desc(cfg, remaining)}", flush=True)
+    print(f"Alerts: {_alert_window_desc(cfg)}", flush=True)
     if not _HAS_ACCESSIBILITY:
-        print("Warning: shake needs pyobjc-framework-ApplicationServices.", file=sys.stderr, flush=True)
+        print("Warning: window wiggle needs pyobjc-framework-ApplicationServices.", file=sys.stderr, flush=True)
     else:
-        print("Shake: frontmost app window.", flush=True)
+        print("Wiggle: frontmost app window only (final seconds).", flush=True)
     if cfg.block_on_end:
         print("Block on end: stop overlay — dismiss to tidy windows (see BLOCK_END_* in .env).", flush=True)
     print("Ctrl+C to quit.", flush=True)
@@ -1586,11 +1732,32 @@ def _main_watch(argv: list[str]) -> int:
 def _add_config_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("config (.env defaults, CLI overrides)")
     g.add_argument("--stroke-width", type=float, default=None)
-    g.add_argument("--shake-before-mins", type=float, default=None, metavar="MIN")
-    g.add_argument("--shake-start-fraction", type=float, default=None, metavar="0-1")
-    g.add_argument("--shake-nudge-seconds", type=float, default=None)
-    g.add_argument("--shake-nudge-level", type=float, default=None, metavar="0-1")
-    g.add_argument("--shake-stop-before-mins", type=float, default=None, metavar="MIN")
+    g.add_argument("--pulse-before-secs", type=float, default=None, metavar="SEC")
+    g.add_argument("--pulse-opacity-ramp-secs", type=float, default=None, metavar="SEC")
+    g.add_argument("--pulse-max-opacity", type=float, default=None, metavar="0-1")
+    g.add_argument("--pulse-depth-min", type=float, default=None, metavar="PX")
+    g.add_argument("--pulse-depth-max", type=float, default=None, metavar="PX")
+    g.add_argument(
+        "--pulse-ramp",
+        choices=["linear", "late"],
+        default=None,
+        help="Pulse ramp preset (default from PULSE_RAMP in .env)",
+    )
+    g.add_argument(
+        "--pulse-ramp-power",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Pulse ramp exponent (overrides --pulse-ramp; 1=linear, 3=late)",
+    )
+    g.add_argument(
+        "--pulse-visual-power",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Draw amplification for pulse (1=linear, 2=old squared)",
+    )
+    g.add_argument("--shake-wiggle-seconds", type=float, default=None, metavar="SEC")
     g.add_argument("--shake-max-x", type=float, default=None)
     g.add_argument("--shake-max-y", type=float, default=None)
     g.add_argument("--shake-speed", type=float, default=None)
@@ -1606,15 +1773,28 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _cli_pulse_ramp_power(args: argparse.Namespace) -> float | None:
+    if args.pulse_ramp_power is not None:
+        return args.pulse_ramp_power
+    if args.pulse_ramp == "linear":
+        return 1.0
+    if args.pulse_ramp == "late":
+        return 3.0
+    return None
+
+
 def _cli_to_config(args: argparse.Namespace) -> AppConfig:
     base = AppConfig.from_env()
     return base.merge_cli(
         stroke_width=args.stroke_width,
-        shake_before_mins=args.shake_before_mins,
-        shake_start_fraction=args.shake_start_fraction,
-        shake_nudge_seconds=args.shake_nudge_seconds,
-        shake_nudge_level=args.shake_nudge_level,
-        shake_stop_before_mins=args.shake_stop_before_mins,
+        pulse_before_secs=args.pulse_before_secs,
+        pulse_opacity_ramp_secs=args.pulse_opacity_ramp_secs,
+        pulse_max_opacity=args.pulse_max_opacity,
+        pulse_depth_min=args.pulse_depth_min,
+        pulse_depth_max=args.pulse_depth_max,
+        pulse_ramp_power=_cli_pulse_ramp_power(args),
+        pulse_visual_power=args.pulse_visual_power,
+        shake_wiggle_seconds=args.shake_wiggle_seconds,
         shake_max_x=args.shake_max_x,
         shake_max_y=args.shake_max_y,
         shake_speed=args.shake_speed,
