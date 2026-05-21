@@ -88,14 +88,15 @@ to `adapters/macos/`:
 These run in CI and locally before a commit. A failure is a hard stop.
 
 ```sh
-# Gate 1 — the dependency rule. domain/ and app/ must not touch the platform.
-grep -REn 'import (AppKit|objc|Cocoa|EventKit|ApplicationServices)|adapters' \
+# Gate 1 — the dependency rule. domain/ and app/ must not import the platform
+# or any adapter. Matches import lines only, so prose may mention "adapters".
+grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|Cocoa|EventKit|ApplicationServices|adapters)' \
      countdown/domain countdown/app && echo "LAYERING VIOLATION" && exit 1
 
 # Gate 2 — no bare user output outside adapters. Domain/app log via the port.
 grep -REn '\bprint\(' countdown/domain countdown/app && echo "USE THE LOGGER" && exit 1
 
-# Gate 3 — tests pass with coverage on the domain.
+# Gate 3 — tests pass.
 .venv/bin/pytest -q
 ```
 

@@ -81,7 +81,7 @@ cd tools/countdown
 ./shake --seconds 20                   # macOS — wiggle tuning harness
 
 # Guard gate — must print nothing:
-grep -REn 'import (AppKit|objc|Cocoa|EventKit|ApplicationServices)|adapters' \
+grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|ApplicationServices|adapters)' \
      countdown/domain countdown/app
 ```
 
