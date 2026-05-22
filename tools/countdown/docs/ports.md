@@ -145,12 +145,12 @@ exactly. If the frontmost window changes, the previous one is restored first.
 **Failure** — no Accessibility permission ⇒ `available()` is `False`, `apply` is
 a no-op, the app logs **one** warning and carries on.
 **Adapter** — `macos/shaker.py` (AX: `AXUIElementCreateApplication`,
-`AXPosition` get/set). The standalone tuning harness `shake_test.py` imports
+`AXPosition` get/set). The standalone tuning harness `shake_tune.py` imports
 this adapter — it no longer duplicates the AX code.
 
-> **Smell fixed.** `shake_test.py` had a near-identical copy of the shake logic
-> (`ShakeTester`). It now drives the real `WindowShaker`. See
-> [`edge-cases.md`](edge-cases.md) #10.
+> **Smell fixed.** The old `shake_test.py` had a near-identical copy of the
+> shake logic (`ShakeTester`). The harness (renamed `shake_tune.py`) now drives
+> the real `WindowShaker`. See [`edge-cases.md`](edge-cases.md) #10.
 
 ---
 

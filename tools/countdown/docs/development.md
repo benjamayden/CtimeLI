@@ -142,7 +142,7 @@ old code or old notes.
 | `calendar_monitor.py` | `CalendarMonitor` | `adapters/macos/calendar.py` |
 | `countdown.py` | `_enable_stdin_nonblocking`, `_read_stdin_chunk` | `adapters/system/stdin_source.py` *(+restore, #18)* |
 | `countdown.py` | `main`, `_main_countdown`, `_main_watch`, arg parsing | `cli.py` |
-| `shake_test.py` | `ShakeTester` (AX half) | *deleted — uses `adapters/macos/shaker.py` (#10)* |
+| `shake_test.py` | `ShakeTester` | *deleted; file renamed `shake_tune.py`, now drives `adapters/macos/shaker.py` + `domain/shake.py` (#10)* |
 
 ---
 

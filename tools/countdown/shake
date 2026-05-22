@@ -7,4 +7,4 @@ if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
   "$ROOT/.venv/bin/pip" install -q -r "$ROOT/requirements.txt"
 fi
 cd "$ROOT"
-exec "$ROOT/.venv/bin/python" "$ROOT/shake_test.py" "$@"
+exec "$ROOT/.venv/bin/python" "$ROOT/shake_tune.py" "$@"

@@ -38,11 +38,13 @@ Defined in `countdown.py` and again in `shake_test.py`. **Fix**: one
 `pulse_spread`. Dead code invites accidental use. **Fix**: deleted; callers use
 `pulse_spread`.
 
-### #10 — Shake logic duplicated in `shake_test.py` · Fixed
-`shake_test.py`'s `ShakeTester` was a ~90% copy of `FocusShaker` — the same AX
-window-move code maintained twice. **Fix**: the AX code lives once in
-`adapters/macos/shaker.py`; `shake_test.py` is now a thin tuning harness that
-drives the real `WindowShaker` adapter.
+### #10 — Shake logic duplicated in the tuning harness · Fixed
+The old `shake_test.py`'s `ShakeTester` was a ~90% copy of `FocusShaker` — the
+same AX window-move code maintained twice. **Fix**: the AX code lives once in
+`adapters/macos/shaker.py` and the wiggle maths once in `domain/shake.py`. The
+harness was renamed `shake_tune.py` (its `*_test.py` name wrongly matched
+pytest's collector) and is now a thin script driving the real `WindowShaker`
+adapter and `ShakeMotion`.
 
 ### #11 — `_TimerBridge` defined twice · Fixed
 The PyObjC `NSTimer` target class existed in both `countdown.py` and
