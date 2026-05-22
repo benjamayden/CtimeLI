@@ -186,6 +186,22 @@ class SignalListener(Protocol):
 
 
 @runtime_checkable
+class UrlOpener(Protocol):
+    """Opens a URL in the system default browser."""
+
+    def open(self, url: str) -> bool:
+        """Return True if the URL was handed to the workspace."""
+
+
+@runtime_checkable
+class WifiSource(Protocol):
+    """Reports the current Wi-Fi network name."""
+
+    def current_ssid(self) -> str | None:
+        """Connected SSID, or None if unavailable or not on Wi-Fi."""
+
+
+@runtime_checkable
 class EnvSource(Protocol):
     """Configuration values, read without mutating os.environ."""
 

@@ -145,8 +145,9 @@ exactly. If the frontmost window changes, the previous one is restored first.
 **Failure** — no Accessibility permission ⇒ `available()` is `False`, `apply` is
 a no-op, the app logs **one** warning and carries on.
 **Adapter** — `macos/shaker.py` (AX: `AXUIElementCreateApplication`,
-`AXPosition` get/set). The standalone tuning harness `shake_tune.py` imports
-this adapter — it no longer duplicates the AX code.
+`AXPosition` get/set). The standalone tuning harness `shake_tune.py` (`./shake`)
+imports this adapter and loads shake settings from `.env` via `build_config()`.
+It no longer duplicates the AX code or hardcodes motion defaults.
 
 > **Smell fixed.** The old `shake_test.py` had a near-identical copy of the
 > shake logic (`ShakeTester`). The harness (renamed `shake_tune.py`) now drives
@@ -213,8 +214,35 @@ fallback; it never aborts the rest of the plan.
 **Failure** — no EventKit / denied permission ⇒ both return falsey, one warning
 logged; the app runs without calendar features.
 **Adapter** — `macos/calendar.py` (`EKEventStore`,
-`predicateForEventsWithStartDate:endDate:calendars:`). **Fake** —
+`predicateForEventsWithStartDate:endDate:calendars:`). Parses `call_url` and
+`room` via `domain/calendar_fields.py`. **Fake** —
 `FakeCalendar` returning a scripted list.
+
+---
+
+## `UrlOpener`
+
+**Purpose** — open a meeting URL in the default browser at zero.
+
+| Method | Contract |
+|--------|----------|
+| `open(url) -> bool` | Hand the URL to the workspace. Return `True` on success. |
+
+**Adapter** — `macos/url_opener.py` (`NSWorkspace.openURL_`). **Fake** —
+`FakeUrlOpener` recording opened URLs.
+
+---
+
+## `WifiSource`
+
+**Purpose** — report the current Wi-Fi SSID for work-network gating.
+
+| Method | Contract |
+|--------|----------|
+| `current_ssid() -> str \| None` | Connected SSID, or `None` if unavailable. |
+
+**Adapter** — `system/wifi.py` (`networksetup -getairportnetwork`). **Fake** —
+`FakeWifiSource` with a settable SSID.
 
 ---
 
@@ -284,6 +312,8 @@ into the app or domain.
 | `AppControl` | `app_control.MacAppControl` | `FakeAppControl` |
 | `BlockEndExecutor` | `block_executor.MacBlockExecutor` | `FakeBlockExecutor` |
 | `CalendarSource` | `calendar.EventKitCalendar` | `FakeCalendar` |
+| `UrlOpener` | `url_opener.MacUrlOpener` | `FakeUrlOpener` |
+| `WifiSource` | `wifi.SystemWifi` | `FakeWifiSource` |
 | `InputSource` | `stdin_source.StdinSource` | `FakeInput` |
 | `SignalListener` | `signals.SigintListener` | `FakeSignals` |
 | `EnvSource` | `dotenv.DotEnvSource` | plain `dict` |

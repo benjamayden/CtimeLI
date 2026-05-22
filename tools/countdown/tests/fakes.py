@@ -246,3 +246,27 @@ class FakeSignals:
 
     def trigger(self) -> None:
         self._interrupted = True
+
+
+class FakeUrlOpener:
+    """UrlOpener that records opened URLs."""
+
+    def __init__(self, *, succeed: bool = True) -> None:
+        self.opened: list[str] = []
+        self._succeed = succeed
+
+    def open(self, url: str) -> bool:
+        if self._succeed:
+            self.opened.append(url)
+            return True
+        return False
+
+
+class FakeWifiSource:
+    """WifiSource with a test-controlled SSID."""
+
+    def __init__(self, ssid: str | None = None) -> None:
+        self.ssid = ssid
+
+    def current_ssid(self) -> str | None:
+        return self.ssid

@@ -12,14 +12,32 @@ import datetime as dt
 from countdown import ports
 from countdown.domain.apps import AppSelector
 from countdown.domain.blockend import block_end_summary, plan_block_end
-from countdown.domain.session import FRAME_INTERVAL, Session, SessionState
+from countdown.domain.calendar import is_work_wifi
+from countdown.domain.session import FRAME_INTERVAL, Session, SessionKind, SessionState
 from countdown.domain.shake import ShakeMotion
 
-_STOP_LINES = [
+_DISMISS_HINT = "Click anywhere to tidy windows · Return · or Ctrl+C"
+_DEFAULT_STOP_LINES = [
     "It's time to stop.",
     "Your session has ended.",
-    "Click anywhere to tidy windows · Return · or Ctrl+C",
+    _DISMISS_HINT,
 ]
+
+
+def _stop_lines(session: Session) -> list[str]:
+    if session.kind is SessionKind.HARD_STOP:
+        return [
+            "End of day.",
+            "Hard stop — time to wrap up.",
+            _DISMISS_HINT,
+        ]
+    if session.kind is SessionKind.CALENDAR and session.room:
+        return [
+            "It's time to go.",
+            f"Room: {session.room}",
+            _DISMISS_HINT,
+        ]
+    return list(_DEFAULT_STOP_LINES)
 
 
 class SessionRunner:
@@ -38,6 +56,8 @@ class SessionRunner:
         app_control: ports.AppControl,
         block_executor: ports.BlockEndExecutor,
         signals: ports.SignalListener,
+        url_opener: ports.UrlOpener,
+        wifi: ports.WifiSource,
         extra_skip: frozenset[AppSelector] = frozenset(),
     ) -> None:
         self.session = session
@@ -50,6 +70,8 @@ class SessionRunner:
         self.app_control = app_control
         self.block_executor = block_executor
         self.signals = signals
+        self.url_opener = url_opener
+        self.wifi = wifi
         # Apps the block-end tidy must leave alone (the host terminal in watch).
         self.extra_skip = extra_skip
         self._motion = ShakeMotion(session.config)
@@ -58,6 +80,7 @@ class SessionRunner:
         self._interrupt_seen = False
         self._last_tick: dt.datetime | None = None
         self._restore_focus_pid: int | None = None
+        self._call_link_opened = False
 
     def run(self) -> Session:
         """Blocking one-shot loop. Returns the session in its terminal state."""
@@ -121,16 +144,27 @@ class SessionRunner:
         self._last_tick = now
         return dt_seconds
 
+    def _on_work_wifi(self) -> bool:
+        return is_work_wifi(
+            self.wifi.current_ssid(), self.session.config.work_wifi_ssids
+        )
+
     def _run_frame(self, now: dt.datetime, dt_seconds: float) -> None:
+        remaining = max(0.0, (self.session.target - now).total_seconds())
+        # Work-Wi-Fi only affects the zero/finish decision — not every frame.
+        need_wifi = self.overlay.finish_requested() or remaining <= dt_seconds
+        on_work = self._on_work_wifi() if need_wifi else False
         if self.overlay.finish_requested():
-            self.session.finish()
+            self.session.finish(on_work_wifi=on_work)
         else:
-            frame = self.session.tick(now, dt_seconds)
+            frame = self.session.tick(now, dt_seconds, on_work_wifi=on_work)
             if self.session.state is SessionState.RUNNING:
                 self.overlay.render(frame)
                 self._apply_shake(frame.shake, dt_seconds)
         if self.session.state is SessionState.BLOCKING:
             self._enter_blocking()
+        elif self.session.state is SessionState.DONE:
+            self._maybe_open_call_link()
 
     def _apply_shake(self, intensity: float, dt_seconds: float) -> None:
         if intensity <= 0.0 or not self.shaker.available():
@@ -145,7 +179,25 @@ class SessionRunner:
         self.shaker.restore()
         self.overlay.hide()
         self.app_control.set_activation_policy(ports.ActivationPolicy.REGULAR)
-        self.stop_overlay.show(list(_STOP_LINES))
+        self.stop_overlay.show(_stop_lines(self.session))
+
+    def _maybe_open_call_link(self) -> None:
+        session = self.session
+        if self._call_link_opened:
+            return
+        if not (
+            session.kind is SessionKind.CALENDAR
+            and session.call_url
+            and not session.room
+        ):
+            return
+        if is_work_wifi(self.wifi.current_ssid(), session.config.work_wifi_ssids):
+            return
+        self._call_link_opened = True
+        if self.url_opener.open(session.call_url):
+            self.logger.info("Opened call link in browser.")
+        else:
+            self.logger.warn("Could not open call link.")
 
     def _run_cleanup(self) -> None:
         self.stop_overlay.hide()

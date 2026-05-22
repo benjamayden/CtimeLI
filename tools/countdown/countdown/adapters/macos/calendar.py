@@ -12,7 +12,8 @@ import time
 import AppKit
 
 from countdown import ports
-from countdown.domain.calendar import CalendarEvent
+from countdown.domain.calendar import CalendarEvent, calendar_block_target, hard_stop_target
+from countdown.domain.calendar_fields import parse_call_url, parse_room
 
 try:
     from EventKit import (
@@ -106,8 +107,17 @@ class EventKitCalendar:
                 continue
             if nearest_start is None or start < nearest_start:
                 event_id = event.eventIdentifier() or f"{event.title()}:{event.startDate()}"
+                location = (event.location() or "").strip()
+                notes = (event.notes() or "").strip()
+                url_field = (event.URL() or "").strip() or None
+                call_url = parse_call_url(url_field, location, notes)
+                room = parse_room(location)
                 nearest = CalendarEvent(
-                    event_id=event_id, title=event.title() or "Event", start=start
+                    event_id=event_id,
+                    title=event.title() or "Event",
+                    start=start,
+                    call_url=call_url,
+                    room=room,
                 )
                 nearest_start = start
         return nearest

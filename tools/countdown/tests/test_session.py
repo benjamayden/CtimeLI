@@ -145,6 +145,59 @@ def test_base_color_by_kind():
     assert cal.base_color.g == cal.config.calendar_stroke_g
 
 
+def test_remote_call_skips_block_off_work_wifi():
+    session = make_session(
+        block_on_end=True,
+        duration=10.0,
+        kind=SessionKind.CALENDAR,
+        call_url="https://zoom.us/j/123",
+    )
+    session.start()
+    session.tick(STARTED + dt.timedelta(seconds=20), FRAME, on_work_wifi=False)
+    assert session.state is SessionState.DONE
+    assert session.blocked is False
+
+
+def test_remote_call_on_work_wifi_still_blocks():
+    session = make_session(
+        block_on_end=True,
+        duration=10.0,
+        kind=SessionKind.CALENDAR,
+        call_url="https://zoom.us/j/123",
+    )
+    session.start()
+    session.tick(STARTED + dt.timedelta(seconds=20), FRAME, on_work_wifi=True)
+    assert session.state is SessionState.BLOCKING
+
+
+def test_room_calendar_still_blocks_on_end():
+    session = make_session(
+        block_on_end=True,
+        duration=10.0,
+        kind=SessionKind.CALENDAR,
+        call_url="https://zoom.us/j/123",
+        room="Room 4B",
+    )
+    session.start()
+    session.tick(STARTED + dt.timedelta(seconds=20), FRAME)
+    assert session.state is SessionState.BLOCKING
+
+
+def test_hard_stop_base_color_and_label():
+    cfg = AppConfig(hard_stop_stroke_g=0.55)
+    target = STARTED + dt.timedelta(minutes=12, seconds=4)
+    session = Session(
+        started=STARTED,
+        target=target,
+        config=cfg,
+        kind=SessionKind.HARD_STOP,
+    )
+    session.start()
+    frame = session.tick(STARTED + dt.timedelta(seconds=10), FRAME)
+    assert session.base_color.r == cfg.hard_stop_stroke_r
+    assert "hard stop" in frame.label
+
+
 def test_calendar_label_has_event_suffix():
     event_start = STARTED + dt.timedelta(hours=1)
     session = make_session(kind=SessionKind.CALENDAR, event_start=event_start)

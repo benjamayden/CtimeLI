@@ -118,8 +118,10 @@ The original kept `pulse_intensity` as a "deprecated alias" that just called
 `(dx, dy)` pixel offset is the pure, stateful `ShakeMotion`. It is pure (no I/O)
 but holds state across frames (a phase accumulator + smoothed offset). The
 `WindowShaker` adapter only *applies* the offset this produces, and the
-standalone shake-tuning harness drives this same class — so the wiggle feel is
-defined in exactly one place (DRY, edge-cases #10).
+standalone shake-tuning harness (`./shake`) drives this same class — so the
+wiggle feel is defined in exactly one place (DRY, edge-cases #10). Both the app
+and `./shake` read `SHAKE_*` from `.env` via `AppConfig`; `./shake --app-timing`
+uses the same `shake_intensity()` ramp as a live session.
 
 `ShakeMotion(cfg)` exposes:
 - `reset()` — drop all motion state (call when the wiggle window closes).
@@ -233,6 +235,8 @@ otherwise:                           -> parse_target_time(s, now)
 event_id: str        # stable EventKit identifier; fallback "{title}:{start}"
 title:    str        # "Event" if the source has none
 start:    datetime   # local time
+call_url: str | None # meeting URL (Zoom/Meet/Teams), if any
+room:     str | None # physical room from location, if not URL-like
 ```
 
 ### `calendar_block_target(event_start, cfg, now) -> datetime | None`
@@ -248,6 +252,17 @@ the meeting, leaving a buffer to arrive. If that buffer window has already
 passed but the meeting hasn't started, the countdown fires to the event start
 itself so the user always gets a signal. Returns `None` only once the event
 has already started.
+
+### `hard_stop_target(cfg, now) -> datetime | None`
+Returns today's hard-stop datetime when `now` is inside
+`(hard_stop_time − warning_mins, hard_stop_time]`. Returns `None` when disabled,
+before the window, or after hard stop has passed.
+
+### `hard_stop_stroke_base(cfg) -> RGB`
+Orange stroke base for `SessionKind.HARD_STOP`.
+
+### `is_work_wifi(ssid, work_ssids) -> bool`
+Pure membership check — the SSID comes from the `WifiSource` port.
 
 ### Event selection (in the adapter, but the rule is domain policy)
 The nearest **accepted** event whose start is in `(now, now + window]` where
@@ -323,8 +338,11 @@ enum plus a transition function. This is the contract a port must reproduce
 *exactly*.
 
 ### `SessionKind`
-`MANUAL` | `CALENDAR` (open enum — future: `HARD_STOP`, …). Selects the stroke
-base colour and the HUD label format.
+`MANUAL` | `CALENDAR` | `HARD_STOP`. Selects the stroke base colour and the HUD
+label format.
+
+Session metadata (calendar only): `call_url`, `room`. Remote call sessions skip
+block-on-end when off work Wi-Fi (`skips_block_for_remote_call(on_work_wifi)`).
 
 ### `SessionState`
 | State | Meaning |
@@ -356,8 +374,8 @@ The overlay renders a `RenderFrame` and asks the domain nothing. Adding a visual
 |------|-------|-------|----|-----|
 | `PENDING` | `start()` | — | `RUNNING` | overlays shown |
 | `RUNNING` | `tick(now)` | `now < target` | `RUNNING` | new `RenderFrame` |
-| `RUNNING` | `tick(now)` | `now >= target` ∧ `block_on_end` | `BLOCKING` | stop overlay shown; stroke/HUD hidden |
-| `RUNNING` | `tick(now)` | `now >= target` ∧ ¬`block_on_end` | `DONE` | — |
+| `RUNNING` | `tick(now)` | `now >= target` ∧ `block_on_end` ∧ ¬remote-call skip | `BLOCKING` | stop overlay shown; stroke/HUD hidden |
+| `RUNNING` | `tick(now)` | `now >= target` ∧ (¬`block_on_end` ∨ remote-call skip) | `DONE` | remote-call skip: open URL off work Wi-Fi (runner) |
 | `RUNNING` | `finish()` | `block_on_end` | `BLOCKING` | as above |
 | `RUNNING` | `finish()` | ¬`block_on_end` | `DONE` | — |
 | `RUNNING` | `retarget(t')` | `t' > now` | `RUNNING` | see §"Retarget" |

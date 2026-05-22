@@ -8,10 +8,11 @@ factory, so it is testable with fakes.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from typing import Protocol
 
 from countdown import ports
-from countdown.domain.calendar import CalendarEvent, calendar_block_target
+from countdown.domain.calendar import CalendarEvent, calendar_block_target, hard_stop_target
 from countdown.domain.config import AppConfig
 from countdown.domain.math import format_duration
 from countdown.domain.session import FRAME_INTERVAL, SessionKind
@@ -21,6 +22,17 @@ from .session_runner import SessionRunner
 
 # Below this difference a calendar target is "the same" — do not retarget.
 _RETARGET_EPSILON_SECONDS = 1.0
+
+
+@dataclass(frozen=True)
+class _WatchCandidate:
+    target: dt.datetime
+    kind: SessionKind
+    event_start: dt.datetime | None = None
+    event_id: str | None = None
+    event_title: str | None = None
+    call_url: str | None = None
+    room: str | None = None
 
 
 class SessionFactory(Protocol):
@@ -34,6 +46,8 @@ class SessionFactory(Protocol):
         event_start: dt.datetime | None,
         event_id: str | None,
         event_title: str | None,
+        call_url: str | None,
+        room: str | None,
     ) -> SessionRunner: ...
 
 
@@ -89,7 +103,8 @@ class WatchRunner:
     def _announce(self) -> None:
         if self.config.calendar_enabled:
             self.calendar.ensure_access()
-            if not self._start_from_nearest_event():
+        if not self._start_from_nearest():
+            if self.config.calendar_enabled:
                 self.logger.info("Calendar: no accepted event in the next window.")
         self.logger.info("Watcher ready — enter 15, 14:00, or q to quit.")
         if self.config.block_on_end:
@@ -150,18 +165,18 @@ class WatchRunner:
             self.logger.error("Target time is already in the past.")
             return
         self._start_session(target, kind=SessionKind.MANUAL)
-        # A manual timer still snaps to a sooner calendar event if there is one.
+        # A manual timer still snaps to a sooner watch candidate if there is one.
         self._retarget_current_to_nearest()
 
     def _poll_calendar(self) -> None:
-        if not self.config.calendar_enabled:
+        if not self.config.calendar_enabled and not self.config.hard_stop_enabled:
             return
         elapsed = self.clock.monotonic() - self._last_cal_poll
         if elapsed < self.config.calendar_poll_seconds:
             return
         self._last_cal_poll = self.clock.monotonic()
         if self._current is None:
-            self._start_from_nearest_event()
+            self._start_from_nearest()
         else:
             self._retarget_current_to_nearest()
 
@@ -175,6 +190,8 @@ class WatchRunner:
         event_start: dt.datetime | None = None,
         event_id: str | None = None,
         event_title: str | None = None,
+        call_url: str | None = None,
+        room: str | None = None,
     ) -> None:
         if self._current is not None:
             self._current.stop()
@@ -184,53 +201,95 @@ class WatchRunner:
             event_start=event_start,
             event_id=event_id,
             event_title=event_title,
+            call_url=call_url,
+            room=room,
         )
         remaining = (target - self.clock.now()).total_seconds()
+        suffix = ""
+        if kind is SessionKind.HARD_STOP:
+            suffix = f" · hard stop {target:%H:%M}"
         self.logger.info(
-            f"Countdown → {target:%H:%M:%S} ({format_duration(remaining)} remaining)"
+            f"Countdown → {target:%H:%M:%S} ({format_duration(remaining)} remaining){suffix}"
         )
 
-    def _start_from_nearest_event(self) -> bool:
-        if self._current is not None or not self.config.calendar_enabled:
+    def _start_from_nearest(self) -> bool:
+        if self._current is not None:
             return False
-        event = self._pending_event()
-        if event is None:
-            return False
-        block_at = calendar_block_target(event.start, self.config, self.clock.now())
-        if block_at is None:
+        candidate = self._nearest_candidate()
+        if candidate is None:
             return False
         self._start_session(
-            block_at,
-            kind=SessionKind.CALENDAR,
-            event_start=event.start,
-            event_id=event.event_id,
-            event_title=event.title,
+            candidate.target,
+            kind=candidate.kind,
+            event_start=candidate.event_start,
+            event_id=candidate.event_id,
+            event_title=candidate.event_title,
+            call_url=candidate.call_url,
+            room=candidate.room,
         )
         return True
 
     def _retarget_current_to_nearest(self) -> None:
-        """Snap the live session to a sooner calendar event (edge-cases #14)."""
-        if self._current is None or not self.config.calendar_enabled:
+        """Snap the live session to a sooner watch candidate (edge-cases #14)."""
+        if self._current is None:
             return
-        event = self._pending_event()
-        if event is None:
-            return
-        block_at = calendar_block_target(event.start, self.config, self.clock.now())
-        if block_at is None:
+        candidate = self._nearest_candidate()
+        if candidate is None:
             return
         session = self._current.session
-        if abs((session.target - block_at).total_seconds()) <= _RETARGET_EPSILON_SECONDS:
+        if abs((session.target - candidate.target).total_seconds()) <= _RETARGET_EPSILON_SECONDS:
             return
         if session.retarget(
-            block_at,
+            candidate.target,
             self.clock.now(),
-            kind=SessionKind.CALENDAR,
-            event_start=event.start,
-            event_id=event.event_id,
-            event_title=event.title,
+            kind=candidate.kind,
+            event_start=candidate.event_start,
+            event_id=candidate.event_id,
+            event_title=candidate.event_title,
+            call_url=candidate.call_url,
+            room=candidate.room,
         ):
-            # The recolour flows through RenderFrame.color on the next tick.
-            self.logger.info(f"Calendar → {block_at:%H:%M} ({event.title})")
+            if candidate.kind is SessionKind.CALENDAR and candidate.event_title:
+                self.logger.info(
+                    f"Calendar → {candidate.target:%H:%M} ({candidate.event_title})"
+                )
+            elif candidate.kind is SessionKind.HARD_STOP:
+                self.logger.info(f"Hard stop → {candidate.target:%H:%M}")
+
+    def _nearest_candidate(self) -> _WatchCandidate | None:
+        now = self.clock.now()
+        candidates: list[_WatchCandidate] = []
+
+        if self.config.calendar_enabled:
+            event = self._pending_event()
+            if event is not None:
+                block_at = calendar_block_target(event.start, self.config, now)
+                if block_at is not None:
+                    candidates.append(
+                        _WatchCandidate(
+                            target=block_at,
+                            kind=SessionKind.CALENDAR,
+                            event_start=event.start,
+                            event_id=event.event_id,
+                            event_title=event.title,
+                            call_url=event.call_url,
+                            room=event.room,
+                        )
+                    )
+
+        if self.config.hard_stop_enabled:
+            stop_at = hard_stop_target(self.config, now)
+            if stop_at is not None:
+                candidates.append(
+                    _WatchCandidate(
+                        target=stop_at,
+                        kind=SessionKind.HARD_STOP,
+                    )
+                )
+
+        if not candidates:
+            return None
+        return min(candidates, key=lambda c: c.target)
 
     def _pending_event(self) -> CalendarEvent | None:
         """Nearest accepted event that has not already fired its block."""

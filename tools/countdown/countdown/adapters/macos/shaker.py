@@ -40,6 +40,7 @@ class MacShaker:
         self._ax_origin: AppKit.NSPoint | None = None
         self._warned_no_access = False
         self._warned_no_target = False
+        self._warned_skipped = False
 
     def available(self) -> bool:
         return _HAS_ACCESSIBILITY and self._enabled
@@ -56,6 +57,13 @@ class MacShaker:
             return False
 
         if self._frontmost_is_skipped():
+            if not self._warned_skipped:
+                self._warned_skipped = True
+                app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+                name = (app.localizedName() if app else None) or "this app"
+                self._logger.info(
+                    f"Shake skipped: {name} is frontmost — focus the window you want nudged."
+                )
             return False
 
         window = self._focused_window()

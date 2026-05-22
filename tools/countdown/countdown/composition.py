@@ -19,11 +19,13 @@ from countdown.adapters.macos.overlay import MacOverlay
 from countdown.adapters.macos.runloop import MacScheduler
 from countdown.adapters.macos.shaker import MacShaker
 from countdown.adapters.macos.stop_overlay import MacStopOverlay
+from countdown.adapters.macos.url_opener import MacUrlOpener
 from countdown.adapters.system.clock import SystemClock
 from countdown.adapters.system.dotenv import DotEnvSource
 from countdown.adapters.system.logger import StderrLogger
 from countdown.adapters.system.signals import SigintListener
 from countdown.adapters.system.stdin_source import StdinSource
+from countdown.adapters.system.wifi import SystemWifi
 from countdown.app.session_runner import SessionRunner
 from countdown.app.watch_runner import WatchRunner
 from countdown.domain.apps import AppSelector, RunningApp, sort_apps_for_manifest
@@ -81,10 +83,14 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
         event_start=None,
         event_id=None,
         event_title=None,
+        call_url=None,
+        room=None,
         clock=clock,
         logger=logger,
         signals=signals,
         extra_skip=frozenset(),
+        url_opener=MacUrlOpener(),
+        wifi=SystemWifi(),
     )
     try:
         session = runner.run()
@@ -110,7 +116,7 @@ def run_watch(config: AppConfig) -> int:
     calendar = EventKitCalendar(logger)
     hosts = _host_terminal_selectors()
 
-    def factory(target, *, kind, event_start, event_id, event_title):
+    def factory(target, *, kind, event_start, event_id, event_title, call_url, room):
         return _make_runner(
             config,
             started=clock.now(),
@@ -119,10 +125,14 @@ def run_watch(config: AppConfig) -> int:
             event_start=event_start,
             event_id=event_id,
             event_title=event_title,
+            call_url=call_url,
+            room=room,
             clock=clock,
             logger=logger,
             signals=signals,
             extra_skip=hosts,
+            url_opener=MacUrlOpener(),
+            wifi=SystemWifi(),
         )
 
     watch = WatchRunner(
@@ -188,10 +198,14 @@ def _make_runner(
     event_start: dt.datetime | None,
     event_id: str | None,
     event_title: str | None,
+    call_url: str | None,
+    room: str | None,
     clock: SystemClock,
     logger: StderrLogger,
     signals: SigintListener,
     extra_skip: frozenset[AppSelector],
+    url_opener: MacUrlOpener,
+    wifi: SystemWifi,
 ) -> SessionRunner:
     session = Session(
         started=started,
@@ -201,6 +215,8 @@ def _make_runner(
         event_start=event_start,
         event_id=event_id,
         event_title=event_title,
+        call_url=call_url,
+        room=room,
     )
     return SessionRunner(
         session,
@@ -214,6 +230,8 @@ def _make_runner(
         block_executor=MacBlockExecutor(logger),
         signals=signals,
         extra_skip=extra_skip,
+        url_opener=url_opener,
+        wifi=wifi,
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 
+from .colors import RGB
 from .config import AppConfig
 
 
@@ -15,6 +16,8 @@ class CalendarEvent:
     event_id: str
     title: str
     start: dt.datetime
+    call_url: str | None = None
+    room: str | None = None
 
 
 def calendar_block_target(
@@ -32,3 +35,33 @@ def calendar_block_target(
     if event_start > now:
         return event_start  # buffer passed but event hasn't started — count to event
     return None
+
+
+def hard_stop_target(cfg: AppConfig, now: dt.datetime) -> dt.datetime | None:
+    """Return today's hard-stop datetime when inside the warning window.
+
+    Window is (hard_stop - warning_mins, hard_stop]. Returns None when disabled,
+    before the window opens, or after hard_stop has passed today.
+    """
+    if not cfg.hard_stop_enabled:
+        return None
+    stop_at = now.replace(
+        hour=cfg.hard_stop_time.hour,
+        minute=cfg.hard_stop_time.minute,
+        second=cfg.hard_stop_time.second,
+        microsecond=0,
+    )
+    window_start = stop_at - dt.timedelta(minutes=cfg.hard_stop_warning_mins)
+    if now <= window_start or now > stop_at:
+        return None
+    return stop_at
+
+
+def hard_stop_stroke_base(cfg: AppConfig) -> RGB:
+    """Stroke base colour for hard-stop sessions."""
+    return RGB(cfg.hard_stop_stroke_r, cfg.hard_stop_stroke_g, cfg.hard_stop_stroke_b)
+
+
+def is_work_wifi(ssid: str | None, work_ssids: frozenset[str]) -> bool:
+    """True when connected to a configured work SSID."""
+    return ssid is not None and ssid in work_ssids

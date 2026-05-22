@@ -7,11 +7,13 @@ the composition root. See docs/configuration.md.
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 
 from .apps import AppSelector
 from .manifest import resolve_block_end_csv
+from .timespec import parse_clock_time
 
 _BLOCK_END_ACTIONS = frozenset({"minimize", "hide", "quit", "skip"})
 
@@ -61,6 +63,17 @@ class AppConfig:
     calendar_stroke_r: float = 0.30
     calendar_stroke_g: float = 0.85
     calendar_stroke_b: float = 0.45
+
+    # Work Wi-Fi — skip auto-opening call links when connected
+    work_wifi_ssids: frozenset[str] = frozenset()
+
+    # End-of-day hard stop (watch mode)
+    hard_stop_enabled: bool = False
+    hard_stop_time: dt.time = dt.time(22, 0)
+    hard_stop_warning_mins: float = 30.0
+    hard_stop_stroke_r: float = 0.95
+    hard_stop_stroke_g: float = 0.55
+    hard_stop_stroke_b: float = 0.15
 
     @classmethod
     def from_mapping(
@@ -118,6 +131,13 @@ class AppConfig:
             calendar_stroke_r=_as_float(env, "CALENDAR_STROKE_R", 0.30),
             calendar_stroke_g=_as_float(env, "CALENDAR_STROKE_G", 0.85),
             calendar_stroke_b=_as_float(env, "CALENDAR_STROKE_B", 0.45),
+            work_wifi_ssids=_as_csv_set(env, "WORK_WIFI_SSIDS"),
+            hard_stop_enabled=_as_bool(env, "HARD_STOP_ENABLED", False),
+            hard_stop_time=_as_clock_time(env, "HARD_STOP_TIME", dt.time(22, 0)),
+            hard_stop_warning_mins=_as_float(env, "HARD_STOP_WARNING_MINS", 30.0),
+            hard_stop_stroke_r=_as_float(env, "HARD_STOP_STROKE_R", 0.95),
+            hard_stop_stroke_g=_as_float(env, "HARD_STOP_STROKE_G", 0.55),
+            hard_stop_stroke_b=_as_float(env, "HARD_STOP_STROKE_B", 0.15),
         )
         return cfg, warnings
 
@@ -151,6 +171,20 @@ def _as_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
 def _as_action(env: Mapping[str, str], key: str, default: str) -> str:
     raw = (env.get(key) or default).strip().lower()
     return raw if raw in _BLOCK_END_ACTIONS else default
+
+
+def _as_csv_set(env: Mapping[str, str], key: str) -> frozenset[str]:
+    raw = env.get(key, "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _as_clock_time(env: Mapping[str, str], key: str, default: dt.time) -> dt.time:
+    raw = env.get(key)
+    if raw is None or not raw.strip():
+        return default
+    return parse_clock_time(raw)
 
 
 def _pulse_ramp_power(env: Mapping[str, str]) -> float:

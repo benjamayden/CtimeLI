@@ -11,6 +11,7 @@ import datetime as dt
 from dataclasses import dataclass
 from enum import Enum
 
+from .calendar import hard_stop_stroke_base
 from .colors import RGB, STROKE_BLUE, stroke_color_for_fraction
 from .config import AppConfig
 from .curves import pulse_opacity, pulse_spread, shake_intensity
@@ -30,6 +31,7 @@ class SessionKind(Enum):
 
     MANUAL = "manual"
     CALENDAR = "calendar"
+    HARD_STOP = "hard_stop"
 
 
 class SessionState(Enum):
@@ -76,6 +78,8 @@ class Session:
         event_start: dt.datetime | None = None,
         event_id: str | None = None,
         event_title: str | None = None,
+        call_url: str | None = None,
+        room: str | None = None,
     ) -> None:
         self.config = config
         self.started = started
@@ -84,6 +88,8 @@ class Session:
         self.event_start = event_start
         self.event_id = event_id
         self.event_title = event_title
+        self.call_url = call_url
+        self.room = room
         self.total_seconds = max(1.0, (target - started).total_seconds())
         self.state = SessionState.PENDING
         # True if Ctrl+C / stop() fired — used for the exit message even when
@@ -109,7 +115,18 @@ class Session:
                 self.config.calendar_stroke_g,
                 self.config.calendar_stroke_b,
             )
+        if self.kind is SessionKind.HARD_STOP:
+            return hard_stop_stroke_base(self.config)
         return STROKE_BLUE
+
+    def skips_block_for_remote_call(self, *, on_work_wifi: bool = False) -> bool:
+        """Calendar sessions with a remote call link skip block-on-end off work Wi-Fi."""
+        return (
+            self.kind is SessionKind.CALENDAR
+            and bool(self.call_url)
+            and not self.room
+            and not on_work_wifi
+        )
 
     # -- transitions ---------------------------------------------------------
 
@@ -118,7 +135,7 @@ class Session:
         if self.state is SessionState.PENDING:
             self.state = SessionState.RUNNING
 
-    def tick(self, now: dt.datetime, dt_seconds: float) -> RenderFrame:
+    def tick(self, now: dt.datetime, dt_seconds: float, *, on_work_wifi: bool = False) -> RenderFrame:
         """Advance one frame. Precondition: state is RUNNING.
 
         Transitions to BLOCKING or DONE when the target is reached. Returns the
@@ -142,13 +159,13 @@ class Session:
             shake=shake_intensity(remaining, self.config),
         )
         if remaining <= 0.0:
-            self._end()
+            self._end(on_work_wifi=on_work_wifi)
         return frame
 
-    def finish(self) -> None:
+    def finish(self, *, on_work_wifi: bool = False) -> None:
         """Finish early (HUD button). RUNNING -> BLOCKING or DONE."""
         if self.state is SessionState.RUNNING:
-            self._end()
+            self._end(on_work_wifi=on_work_wifi)
 
     def retarget(
         self,
@@ -159,6 +176,8 @@ class Session:
         event_start: dt.datetime | None = None,
         event_id: str | None = None,
         event_title: str | None = None,
+        call_url: str | None = None,
+        room: str | None = None,
     ) -> bool:
         """Move the live target (calendar snap). Returns True if applied.
 
@@ -179,6 +198,10 @@ class Session:
             self.event_id = event_id
         if event_title is not None:
             self.event_title = event_title
+        if call_url is not None:
+            self.call_url = call_url
+        if room is not None:
+            self.room = room
         return True
 
     def interrupt(self) -> None:
@@ -207,9 +230,11 @@ class Session:
 
     # -- internals -----------------------------------------------------------
 
-    def _end(self) -> None:
+    def _end(self, *, on_work_wifi: bool = False) -> None:
         """Shared RUNNING-exit decision for both zero and finish()."""
-        if self.config.block_on_end:
+        if self.config.block_on_end and not self.skips_block_for_remote_call(
+            on_work_wifi=on_work_wifi
+        ):
             self.blocked = True
             self.state = SessionState.BLOCKING
         else:
@@ -219,4 +244,6 @@ class Session:
         text = format_duration(remaining)
         if self.kind is SessionKind.CALENDAR and self.event_start is not None:
             text = f"{text} · {self.event_start.strftime('%H:%M')}"
+        elif self.kind is SessionKind.HARD_STOP:
+            text = f"{text} · hard stop {self.target.strftime('%H:%M')}"
         return text

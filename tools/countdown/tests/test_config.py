@@ -99,6 +99,21 @@ def test_merge_rejects_unknown_keys():
         AppConfig().merge(stoke_width=20.0)  # deliberate typo
 
 
+def test_work_wifi_and_hard_stop_config_parsing():
+    cfg, _ = AppConfig.from_mapping({
+        "WORK_WIFI_SSIDS": "Office-Guest, CorpWiFi",
+        "HARD_STOP_ENABLED": "true",
+        "HARD_STOP_TIME": "22:00",
+        "HARD_STOP_WARNING_MINS": "45",
+        "HARD_STOP_STROKE_R": "0.9",
+    })
+    assert cfg.work_wifi_ssids == frozenset({"Office-Guest", "CorpWiFi"})
+    assert cfg.hard_stop_enabled is True
+    assert cfg.hard_stop_time.hour == 22
+    assert cfg.hard_stop_warning_mins == 45.0
+    assert cfg.hard_stop_stroke_r == 0.9
+
+
 def test_config_is_immutable():
     cfg = AppConfig()
     with pytest.raises(Exception):

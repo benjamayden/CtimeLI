@@ -62,6 +62,41 @@ an error, not a silent drop ([`edge-cases.md`](edge-cases.md) #6).
 | `shake_speed_y` | `SHAKE_SPEED_Y` | `10.0` | Y-axis frequency multiplier. |
 | `shake_smooth` | `SHAKE_SMOOTH` | `14.0` | Motion smoothing rate (`lerp` rate; higher = snappier). |
 
+**Single source of truth.** All seven fields above live on `AppConfig` and are
+read by `./run`, `./run watch`, and `./shake`. Edit `.env` once; every entry
+point picks up the same motion parameters. The wiggle *timing* in a real session
+comes from `domain/curves.py::shake_intensity` (last N seconds only); the wiggle
+*feel* (amplitude, speed, smoothing) comes from the `SHAKE_*` fields via
+`domain/shake.py::ShakeMotion`.
+
+### Tuning with `./shake`
+
+The harness (`shake_tune.py`, invoked as `./shake`) loads `.env` through the
+same `build_config()` path as `./run`. CLI flags override `.env` only when
+explicitly passed (`None` default = keep `.env` value).
+
+```sh
+./shake                     # duration = SHAKE_WIGGLE_SECONDS; motion from .env
+./shake --app-timing        # same intensity ramp as ./run (recommended preview)
+./shake --seconds 10        # longer run; motion still from .env
+./shake --speed 12          # one-off override; .env unchanged
+```
+
+On startup `./shake` prints the active values, e.g.
+`max=(28,28) speed=10 smooth=14 (from .env)`.
+
+| `./shake` flag | Meaning |
+|----------------|---------|
+| `--seconds SEC` | How long to run (default: `SHAKE_WIGGLE_SECONDS`). |
+| `--app-timing` | Use `shake_intensity()` like the app — ramp only in the final wiggle window. Without this flag, intensity ramps 0→1 over the full run (legacy tuning mode). |
+| `--intensity 0-1` | Fixed intensity for the whole run (overrides ramp). |
+| `--max-x`, `--max-y`, `--speed`, `--speed-x`, `--speed-y`, `--smooth` | Override the matching `SHAKE_*` field for one run. |
+
+**Harness vs app.** `./shake` does not draw the stroke overlay and does not skip
+the host terminal — focus the window you want nudged before running. In
+`./run` / `./run watch`, Terminal / Python / Cursor are never wiggled when
+frontmost; the app logs once if shake is skipped for that reason.
+
 ### Removed legacy keys
 
 The original `AppConfig` carried five fields that were loaded but **never
@@ -131,6 +166,23 @@ Independently of block-end, the wiggle never targets: `Terminal`, `iTerm2`,
 | `calendar_stroke_g` | `CALENDAR_STROKE_G` | `0.85` | …green channel. |
 | `calendar_stroke_b` | `CALENDAR_STROKE_B` | `0.45` | …blue channel. |
 
+## Work Wi-Fi
+
+| Field | Env key | Default | Meaning |
+|-------|---------|---------|---------|
+| `work_wifi_ssids` | `WORK_WIFI_SSIDS` | *(empty)* | Comma-separated SSIDs. When connected, remote call links are **not** auto-opened; block-on-end runs normally instead. |
+
+## Hard stop (watch mode)
+
+| Field | Env key | Default | Meaning |
+|-------|---------|---------|---------|
+| `hard_stop_enabled` | `HARD_STOP_ENABLED` | `false` | Auto-start an end-of-day countdown in watch mode. |
+| `hard_stop_time` | `HARD_STOP_TIME` | `22:00` | Local clock time the stroke reaches zero. |
+| `hard_stop_warning_mins` | `HARD_STOP_WARNING_MINS` | `30.0` | Orange stroke starts this many minutes before `hard_stop_time`. |
+| `hard_stop_stroke_r` | `HARD_STOP_STROKE_R` | `0.95` | Hard-stop stroke base, red channel. |
+| `hard_stop_stroke_g` | `HARD_STOP_STROKE_G` | `0.55` | …green channel. |
+| `hard_stop_stroke_b` | `HARD_STOP_STROKE_B` | `0.15` | …blue channel. |
+
 ---
 
 ## CLI flags
@@ -166,12 +218,6 @@ noted.
 ./run --for-minutes 25        # explicit minutes
 ./run watch                   # watch mode (stdin + calendar)
 ./run 25 --block-on-end       # tidy windows at zero
-./shake --seconds 20          # standalone wiggle-tuning harness
+./shake                       # wiggle harness — reads .env (see Window wiggle above)
+./shake --app-timing          # preview wiggle timing exactly like ./run
 ```
-
-## Future config (planned, not yet implemented)
-
-From the calendar-calls / hard-stop plan — listed so a port leaves room:
-`WORK_WIFI_SSIDS`, `HARD_STOP_ENABLED`, `HARD_STOP_TIME`,
-`HARD_STOP_WARNING_MINS`, `HARD_STOP_STROKE_R/G/B`. See
-[`features.md`](features.md) §"Future session kinds".

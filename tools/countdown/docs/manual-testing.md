@@ -51,16 +51,28 @@ cd tools/countdown
 
 ## 3. Window wiggle
 
+**Quick harness** (reads `.env`, matches `./run` timing):
+
+```sh
+./shake --app-timing
+```
+
+Focus a normal window (e.g. TextEdit or Notes) before running — not this
+terminal. `./shake` prints the active `SHAKE_*` values on startup.
+
+**In a real countdown** (full stroke + HUD):
+
 ```sh
 ./run 0.05    # ~3 second timer — the whole thing is the wiggle window
 ```
 
-Focus a normal window (e.g. TextEdit or Notes) before running.
-
 **Watch for:**
-- [ ] The frontmost window oscillates left/right for the ~3 seconds
+- [ ] The frontmost window oscillates during the final `SHAKE_WIGGLE_SECONDS`
 - [ ] At zero the window snaps back **exactly** to where it started
-- [ ] Your terminal (the launcher) is never wiggled
+- [ ] Your terminal (the launcher) is never wiggled during `./run`
+- [ ] Changing `SHAKE_SPEED` / `SHAKE_SMOOTH` in `.env` changes `./shake --app-timing`
+
+Automated checklist: `./test_manual.sh shake` (same as `./shake --app-timing`).
 
 ---
 

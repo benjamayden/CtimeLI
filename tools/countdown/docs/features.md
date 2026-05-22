@@ -65,10 +65,13 @@ oscillates — a hard-to-ignore "wrap it up" signal.
   (Dock, WindowManager, …). See [`configuration.md`](configuration.md).
 - Requires macOS Accessibility permission. Without it the feature disables
   itself with one warning and the rest of the app runs normally.
+- Tune motion in `.env` (`SHAKE_*`); preview with `./shake --app-timing`. See
+  [`configuration.md`](configuration.md) §"Window wiggle".
 
 **Acceptance**: with >3 s left, no window moves; in the last 3 s the frontmost
 window wiggles with rising amplitude; after zero (or on quit) it sits exactly
-where it started.
+where it started. `./shake --app-timing` with a non-terminal window focused
+should feel the same in the final `SHAKE_WIGGLE_SECONDS`.
 
 ## 5. The HUD
 
@@ -197,18 +200,42 @@ permission gap:
 
 ---
 
-## Future session kinds (designed-for, not yet built)
+## Session kinds beyond manual
 
-The architecture treats "session kind" as an open enum so these slot in as
-*data*, not as new branches. They are documented here so the domain shape
-accommodates them; see [`.cursor/plans/calendar_calls_hard_stop_*.plan.md`].
+The architecture treats "session kind" as an open enum — new kinds are *data*,
+not new frame-loop branches.
 
-- **Hard stop** — an end-of-day session (`HARD_STOP_TIME`), orange stroke,
-  starting `HARD_STOP_WARNING_MINS` before the deadline.
-- **Calendar call links** — a calendar event with a meeting URL opens the call
-  in the browser at block time (unless on a work Wi-Fi SSID).
-- **Room overlay** — a calendar event with a physical room shows the room name
-  on the stop overlay.
+### Hard stop (watch mode)
 
-Each is a new `SessionKind` value + a stroke colour + optional metadata on the
-session — no change to the frame loop or the state machine.
+- **Trigger**: `HARD_STOP_ENABLED=true` and the current time is within
+  `(hard_stop_time − warning_mins, hard_stop_time]`.
+- **Stroke**: orange (`HARD_STOP_STROKE_*`).
+- **HUD**: `12m 04s · hard stop 22:00`.
+- **At zero**: normal block-on-end when `BLOCK_ON_END=true`; stop overlay shows
+  *End of day.* / *Hard stop — time to wrap up.*
+- **Priority**: nearest `block_at` wins — a calendar cleanup at 21:53 beats a
+  hard stop at 22:00 if both are in window.
+
+**Acceptance**: `./run watch` with `HARD_STOP_TIME` ~2 min ahead and
+`HARD_STOP_WARNING_MINS=30` → orange stroke; block fires at the configured time.
+
+### Calendar call links
+
+- **Trigger**: calendar event with a meeting URL (`call_url`) and no physical
+  `room`.
+- **Off work Wi-Fi** (`WORK_WIFI_SSIDS`): at zero, opens the URL in the default
+  browser and ends cleanly — **no** stop overlay, **no** window tidy, even when
+  `BLOCK_ON_END=true` (so the meeting tab is not minimised).
+- **On work Wi-Fi**: no browser open; block-on-end runs normally if enabled.
+
+**Acceptance**: off-work Wi-Fi, Zoom URL event, `BLOCK_ON_END=true` → browser
+opens, no full-screen overlay, Chrome stays foreground.
+
+### Room overlay
+
+- **Trigger**: calendar event with a non-URL `location` (e.g. *Room 4B*).
+- **At zero**: normal block-on-end; stop overlay shows *Room: {room}* instead of
+  the default copy. Browser is **not** opened.
+
+**Acceptance**: location `"Room 3A"`, `BLOCK_ON_END=true` → overlay shows room,
+tidy on dismiss as today.

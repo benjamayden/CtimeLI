@@ -21,8 +21,12 @@ exercises everything except the macOS adapters.
 Run the app via the bootstrap scripts (they create the venv on first use):
 
 ```sh
-./run 15            ./run watch            ./shake --seconds 20
+./run 15            ./run watch            ./shake --app-timing
 ```
+
+Tune wiggle feel in `.env` (`SHAKE_*`); use `./shake --app-timing` to preview
+before a long watch session. See [`configuration.md`](configuration.md) §"Window
+wiggle".
 
 ---
 
@@ -43,7 +47,8 @@ expected outputs.
 - `test_shake.py` — `ShakeMotion`: zero rest, amplitude bound, `reset`.
 - `test_timespec.py` — **every row of the parsing table in
   [`domain.md`](domain.md) §4**, including the ambiguous-hour and error cases.
-- `test_calendar.py` — `calendar_block_target` (skips when `block_at <= now`).
+- `test_calendar.py` — `calendar_block_target`, `hard_stop_target`, `is_work_wifi`.
+- `test_calendar_fields.py` — URL/room parsing from EventKit text fields.
 - `test_blockend.py` — `plan_block_end`: precedence, alias expansion, the
   two-pass running-vs-foreground rule, skip sets.
 - `test_config.py` — `AppConfig.from_mapping` parsing and `merge` (unknown
@@ -78,6 +83,9 @@ to `adapters/macos/`:
 - [ ] `./run watch` — type `1`, get a timer; type `q`, clean exit; **the
       terminal still works afterward** (regression guard for #18).
 - [ ] Calendar event within 10 min auto-starts a green session.
+- [ ] Remote call event (Zoom URL, off work Wi-Fi) opens browser at zero with no stop overlay.
+- [ ] Room-only event shows room on stop overlay when `BLOCK_ON_END=true`.
+- [ ] Hard stop (`HARD_STOP_ENABLED`) shows orange stroke in watch mode.
 - [ ] Revoke Accessibility / Calendar permission → one warning, app still runs.
 
 ### Running tests
