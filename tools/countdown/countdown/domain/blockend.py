@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from enum import Enum
 
+from .apps import AppSelector, RunningApp, app_matches_selector, expand_aliases, name_in_list
 from .config import AppConfig
 
 
@@ -21,72 +22,53 @@ class BlockAction(Enum):
     MINIMIZE = "minimize"
 
 
-# Never touched, regardless of config.
+# Never touched, regardless of config — checked against display_name.
 SYSTEM_SKIP: frozenset[str] = frozenset(
     {"SystemUIServer", "WindowManager", "Dock", "loginwindow", "Python", "python"}
 )
 
-# Casual .env names -> the System Events / NSWorkspace process names.
-_PROCESS_ALIASES: dict[str, frozenset[str]] = {
-    "chrome": frozenset({"Google Chrome", "Chrome"}),
-    "google chrome": frozenset({"Google Chrome", "Chrome"}),
-    "settings": frozenset({"System Settings", "Settings"}),
-    "system preferences": frozenset({"System Settings"}),
-    "iterm": frozenset({"iTerm2", "iTerm"}),
-    "vscode": frozenset({"Code"}),
-    "terminal": frozenset({"Terminal", "Apple_Terminal"}),
-    "apple_terminal": frozenset({"Terminal", "Apple_Terminal"}),
-    "cursor": frozenset({"Cursor"}),
-}
-
-
-def expand_aliases(names: Iterable[str]) -> frozenset[str]:
-    """Expand each name to itself plus any known aliases."""
-    expanded: set[str] = set(names)
-    for name in names:
-        expanded |= _PROCESS_ALIASES.get(name.lower(), frozenset())
-    return frozenset(expanded)
-
-
-def name_in_list(name: str, names: Iterable[str]) -> bool:
-    """True if `name` matches `names` after alias expansion, case-insensitively."""
-    expanded = expand_aliases(names)
-    if name in expanded:
-        return True
-    return name.lower() in {candidate.lower() for candidate in expanded}
-
 
 def plan_block_end(
-    running_apps: Iterable[str],
-    foreground_apps: Iterable[str],
+    running_apps: Iterable[RunningApp],
+    foreground_apps: Iterable[RunningApp],
     cfg: AppConfig,
-    extra_skip: Iterable[str] = (),
+    extra_skip: Iterable[AppSelector] = (),
 ) -> list[tuple[str, BlockAction]]:
-    """Decide the ordered (app, action) plan for a block-end tidy.
+    """Decide the ordered (bundle_id, action) plan for a block-end tidy.
 
-    Pass 1: explicit .env lists, over every running app (incl. windowless).
+    Pass 1: explicit .env selectors, over every running app (incl. windowless).
     Pass 2: the default action, over foreground apps only.
     SKIP-ed apps and SKIP actions never appear in the returned plan.
+    Apps without a bundle_id that match a selector are silently excluded
+    (no safe AppleScript target).
     """
-    skip = frozenset(SYSTEM_SKIP | cfg.block_end_skip | frozenset(extra_skip))
+    all_skip: frozenset[AppSelector] = cfg.block_end_skip | frozenset(extra_skip)
     default = BlockAction(cfg.block_end_default)
 
     plan: list[tuple[str, BlockAction]] = []
-    assigned: set[str] = set()
+    assigned: set[str] = set()  # tracks assigned bundle_ids
 
-    def assign(app: str, action: BlockAction) -> None:
-        if app in assigned or name_in_list(app, skip):
+    def _is_skipped(app: RunningApp) -> bool:
+        if app.display_name in SYSTEM_SKIP:
+            return True
+        return any(app_matches_selector(app, sel) for sel in all_skip)
+
+    def assign(app: RunningApp, action: BlockAction) -> None:
+        bundle_id = app.bundle_id
+        if bundle_id is None:
+            return  # can't target without a bundle ID
+        if bundle_id in assigned or _is_skipped(app):
             return
-        assigned.add(app)
+        assigned.add(bundle_id)
         if action is not BlockAction.SKIP:
-            plan.append((app, action))
+            plan.append((bundle_id, action))
 
     for app in running_apps:
-        if name_in_list(app, cfg.block_end_quit):
+        if any(app_matches_selector(app, sel) for sel in cfg.block_end_quit):
             assign(app, BlockAction.QUIT)
-        elif name_in_list(app, cfg.block_end_hide):
+        elif any(app_matches_selector(app, sel) for sel in cfg.block_end_hide):
             assign(app, BlockAction.HIDE)
-        elif name_in_list(app, cfg.block_end_minimize):
+        elif any(app_matches_selector(app, sel) for sel in cfg.block_end_minimize):
             assign(app, BlockAction.MINIMIZE)
 
     for app in foreground_apps:

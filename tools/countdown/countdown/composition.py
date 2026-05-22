@@ -26,11 +26,14 @@ from countdown.adapters.system.signals import SigintListener
 from countdown.adapters.system.stdin_source import StdinSource
 from countdown.app.session_runner import SessionRunner
 from countdown.app.watch_runner import WatchRunner
+from countdown.domain.apps import AppSelector, RunningApp, sort_apps_for_manifest
 from countdown.domain.config import AppConfig
+from countdown.domain.manifest import format_manifest, parse_manifest
 from countdown.domain.math import format_duration
 from countdown.domain.session import Session, SessionKind
 
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+_MANIFEST_PATH = Path(__file__).resolve().parent.parent / "apps.manifest"
 
 # Apps the wiggle never targets (system UI + the Python process itself).
 _NEVER_WIGGLE = frozenset(
@@ -41,10 +44,15 @@ _HOST_TERMINALS = frozenset({"Terminal", "iTerm2", "iTerm", "Warp", "Cursor"})
 _TERM_PROGRAM_TO_APP = {"Apple_Terminal": "Terminal", "iTerm.app": "iTerm2"}
 
 
-def build_config(**cli_overrides: object) -> AppConfig:
-    """Assemble AppConfig: defaults < .env < process env < CLI overrides."""
+def build_config(**cli_overrides: object) -> tuple[AppConfig, list[str]]:
+    """Assemble AppConfig: defaults < .env < process env < CLI overrides.
+
+    Returns (config, warnings) where warnings are stale manifest index messages.
+    """
     env = DotEnvSource(_ENV_PATH).values()
-    return AppConfig.from_mapping(env).merge(**cli_overrides)
+    manifest = _load_manifest()
+    cfg, warnings = AppConfig.from_mapping(env, manifest=manifest)
+    return cfg.merge(**cli_overrides), warnings
 
 
 def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
@@ -94,7 +102,7 @@ def run_watch(config: AppConfig) -> int:
     signals = SigintListener()
     input_source = StdinSource()
     calendar = EventKitCalendar(logger)
-    hosts = _host_terminals()
+    hosts = _host_terminal_selectors()
 
     def factory(target, *, kind, event_start, event_id, event_title):
         return _make_runner(
@@ -125,7 +133,44 @@ def run_watch(config: AppConfig) -> int:
     return watch.run()
 
 
+def run_apps() -> int:
+    """Print a numbered table of running GUI apps and write apps.manifest."""
+    _init_appkit()
+    ctrl = MacAppControl()
+    apps: list[RunningApp] = sort_apps_for_manifest(ctrl.running_apps())
+    if not apps:
+        print("No regular GUI apps found.")
+        return 0
+
+    index_to_bundle: dict[int, str] = {}
+    col_w = max(len(a.display_name) for a in apps)
+    print()
+    for i, app in enumerate(apps, start=1):
+        bundle_str = app.bundle_id or "(no bundle ID)"
+        print(f"  {i:2}  {app.display_name:<{col_w}}  {bundle_str}")
+        if app.bundle_id:
+            index_to_bundle[i] = app.bundle_id
+
+    indices_str = ",".join(str(i) for i in sorted(index_to_bundle)[:3])
+    print(f"\nCopy into .env:  BLOCK_END_QUIT={indices_str}")
+
+    if index_to_bundle:
+        manifest_text = format_manifest(index_to_bundle)
+        _MANIFEST_PATH.write_text(manifest_text)
+        print(f"Manifest written: {_MANIFEST_PATH}")
+    return 0
+
+
 # -- internals ---------------------------------------------------------------
+
+
+def _load_manifest() -> dict[int, str]:
+    if not _MANIFEST_PATH.exists():
+        return {}
+    try:
+        return parse_manifest(_MANIFEST_PATH.read_text())
+    except OSError:
+        return {}
 
 
 def _make_runner(
@@ -140,7 +185,7 @@ def _make_runner(
     clock: SystemClock,
     logger: StderrLogger,
     signals: SigintListener,
-    extra_skip: frozenset[str],
+    extra_skip: frozenset[AppSelector],
 ) -> SessionRunner:
     session = Session(
         started=started,
@@ -158,7 +203,7 @@ def _make_runner(
         scheduler=MacScheduler(),
         overlay=MacOverlay(config, logger),
         stop_overlay=MacStopOverlay(),
-        shaker=MacShaker(logger, _NEVER_WIGGLE | _host_terminals()),
+        shaker=MacShaker(logger, _NEVER_WIGGLE | _host_terminal_names()),
         app_control=MacAppControl(),
         block_executor=MacBlockExecutor(logger),
         signals=signals,
@@ -166,7 +211,7 @@ def _make_runner(
     )
 
 
-def _host_terminals() -> frozenset[str]:
+def _host_terminal_names() -> frozenset[str]:
     names = set(_HOST_TERMINALS)
     term = os.environ.get("TERM_PROGRAM", "").strip()
     if term:
@@ -175,6 +220,13 @@ def _host_terminals() -> frozenset[str]:
         if mapped:
             names.add(mapped)
     return frozenset(names)
+
+
+def _host_terminal_selectors() -> frozenset[AppSelector]:
+    return frozenset(
+        AppSelector(kind="display_name", value=name)
+        for name in _host_terminal_names()
+    )
 
 
 def _init_appkit() -> None:

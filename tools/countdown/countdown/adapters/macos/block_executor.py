@@ -1,8 +1,9 @@
 """MacBlockExecutor — the BlockEndExecutor port.
 
-Executes the (app, action) plan that domain.blockend.plan_block_end produced:
-terminate / hide / minimize via NSRunningApplication and AppleScript. The plan
-is already filtered of skipped apps. See docs/ports.md.
+Executes the (bundle_id, action) plan that domain.blockend.plan_block_end
+produced: terminate / hide / minimize via NSRunningApplication and AppleScript.
+All AppleScript targets apps by bundle identifier — never by display name.
+See docs/ports.md and edge-cases.md.
 """
 
 from __future__ import annotations
@@ -13,7 +14,11 @@ import time
 import AppKit
 
 from countdown import ports
-from countdown.domain.blockend import BlockAction, expand_aliases
+from countdown.domain.blockend import BlockAction
+
+from .applescript_templates import hide_script, minimize_script
+
+_FINDER_BUNDLE_ID = "com.apple.finder"
 
 
 class MacBlockExecutor:
@@ -23,51 +28,51 @@ class MacBlockExecutor:
         self._logger = logger
 
     def execute(self, plan: list[tuple[str, BlockAction]]) -> dict[str, int]:
-        to_quit = [name for name, action in plan if action is BlockAction.QUIT]
-        to_hide = [name for name, action in plan if action is BlockAction.HIDE]
-        to_minimize = [name for name, action in plan if action is BlockAction.MINIMIZE]
+        to_quit = [bid for bid, action in plan if action is BlockAction.QUIT]
+        to_hide = [bid for bid, action in plan if action is BlockAction.HIDE]
+        to_minimize = [bid for bid, action in plan if action is BlockAction.MINIMIZE]
 
         counts = {"minimize": 0, "hide": 0, "quit": 0}
         failed_quit: list[str] = []
 
-        for name in to_quit:
-            if self._quit_application(name):
+        for bundle_id in to_quit:
+            if self._quit_by_bundle_id(bundle_id):
                 counts["quit"] += 1
             else:
-                failed_quit.append(name)
-                if self._hide_processes([name]) > 0:
+                failed_quit.append(bundle_id)
+                script = hide_script([bundle_id])
+                if script and _run_osascript_count(script) > 0:
                     counts["hide"] += 1
 
-        counts["hide"] += self._hide_processes(to_hide)
-        counts["minimize"] += self._minimize_processes(to_minimize)
+        hide_count = _run_hide(to_hide)
+        counts["hide"] += hide_count
+        counts["minimize"] += _run_minimize(to_minimize)
 
         if failed_quit:
             self._logger.error(
                 f"Could not quit: {', '.join(failed_quit)} "
-                "(macOS may block Finder/system apps, or the name may differ)."
+                "(macOS may block Finder/system apps, or the bundle ID may have changed)."
             )
         return counts
 
     # -- termination ---------------------------------------------------------
 
-    def _quit_application(self, process_name: str) -> bool:
-        if process_name == "Finder":
+    def _quit_by_bundle_id(self, bundle_id: str) -> bool:
+        if bundle_id == _FINDER_BUNDLE_ID:
             # macOS will not quit Finder — hide it instead.
-            return self._hide_processes(["Finder"]) > 0
+            script = hide_script([bundle_id])
+            return bool(script and _run_osascript_count(script) > 0)
 
-        targets = expand_aliases([process_name])
-        target_lowers = {name.lower() for name in targets}
         workspace = AppKit.NSWorkspace.sharedWorkspace()
         for app in workspace.runningApplications():
-            name = app.localizedName() or ""
-            if name not in targets and name.lower() not in target_lowers:
+            if (app.bundleIdentifier() or "") != bundle_id:
                 continue
             if app.activationPolicy() != AppKit.NSApplicationActivationPolicyRegular:
                 continue
             pid = app.processIdentifier()
             if not app.terminate():
                 app.forceTerminate()
-            for _ in range(10):
+            for _ in range(30):
                 time.sleep(0.1)
                 if not any(
                     other.processIdentifier() == pid
@@ -77,55 +82,19 @@ class MacBlockExecutor:
             return False
         return False
 
-    # -- AppleScript hide / minimize ----------------------------------------
 
-    def _hide_processes(self, processes: list[str]) -> int:
-        if not processes:
-            return 0
-        script = f"""
-set hideCount to 0
-tell application "System Events"
-    repeat with procName in {_name_list(processes)}
-        try
-            set visible of process procName to false
-            set hideCount to hideCount + 1
-        end try
-    end repeat
-end tell
-return hideCount
-"""
-        return _run_osascript_count(script)
-
-    def _minimize_processes(self, processes: list[str]) -> int:
-        if not processes:
-            return 0
-        script = f"""
-set minCount to 0
-tell application "System Events"
-    repeat with procName in {_name_list(processes)}
-        try
-            tell process procName
-                set windowCount to count of windows
-                repeat with i from windowCount to 1 by -1
-                    try
-                        set value of attribute "AXMinimized" of window i to true
-                        set minCount to minCount + 1
-                    end try
-                end repeat
-            end tell
-        end try
-    end repeat
-end tell
-return minCount
-"""
-        return _run_osascript_count(script)
+def _run_hide(bundle_ids: list[str]) -> int:
+    script = hide_script(bundle_ids)
+    if not script:
+        return 0
+    return _run_osascript_count(script)
 
 
-def _name_list(names: list[str]) -> str:
-    """Render an AppleScript list literal of process names."""
-    if not names:
-        return "{}"
-    return "{" + ", ".join(f'"{name}"' for name in sorted(set(names))) + "}"
+def _run_minimize(bundle_ids: list[str]) -> int:
+    script = minimize_script(bundle_ids)
+    if not script:
+        return 0
+    return _run_osascript_count(script)
 
 
 def _run_osascript_count(script: str) -> int:

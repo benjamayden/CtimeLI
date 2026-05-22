@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 
 from countdown import ports
+from countdown.domain.apps import RunningApp
 from countdown.domain.blockend import BlockAction
 from countdown.domain.calendar import CalendarEvent
 from countdown.domain.session import RenderFrame
@@ -138,14 +139,14 @@ class FakeAppControl:
         self,
         *,
         frontmost: int | None = None,
-        running: list[str] | None = None,
-        foreground: list[str] | None = None,
-        names: dict[int, str] | None = None,
+        running: list[RunningApp] | None = None,
+        foreground: list[RunningApp] | None = None,
+        apps_by_pid: dict[int, RunningApp] | None = None,
     ) -> None:
         self._frontmost = frontmost
         self._running = running or []
         self._foreground = foreground or []
-        self._names = names or {}
+        self._apps_by_pid = apps_by_pid or {}
         self.activated_pids: list[int] = []
         self.finder_activations = 0
         self.policies: list[ports.ActivationPolicy] = []
@@ -153,20 +154,20 @@ class FakeAppControl:
     def frontmost_pid(self) -> int | None:
         return self._frontmost
 
-    def app_name_for_pid(self, pid: int) -> str | None:
-        return self._names.get(pid)
+    def app_for_pid(self, pid: int) -> RunningApp | None:
+        return self._apps_by_pid.get(pid)
 
     def activate_pid(self, pid: int) -> bool:
         self.activated_pids.append(pid)
-        return pid in self._names
+        return pid in self._apps_by_pid
 
     def activate_finder(self) -> None:
         self.finder_activations += 1
 
-    def running_app_names(self) -> list[str]:
+    def running_apps(self) -> list[RunningApp]:
         return list(self._running)
 
-    def foreground_app_names(self) -> list[str]:
+    def foreground_apps(self) -> list[RunningApp]:
         return list(self._foreground)
 
     def set_activation_policy(self, policy: ports.ActivationPolicy) -> None:

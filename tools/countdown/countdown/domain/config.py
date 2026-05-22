@@ -10,6 +10,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 
+from .apps import AppSelector
+from .manifest import resolve_block_end_csv
+
 _BLOCK_END_ACTIONS = frozenset({"minimize", "hide", "quit", "skip"})
 
 # PULSE_RAMP preset name -> spread-curve exponent.
@@ -45,10 +48,10 @@ class AppConfig:
     # Block-on-end
     block_on_end: bool = False
     block_end_default: str = "minimize"
-    block_end_minimize: frozenset[str] = frozenset()
-    block_end_hide: frozenset[str] = frozenset()
-    block_end_quit: frozenset[str] = frozenset()
-    block_end_skip: frozenset[str] = frozenset()
+    block_end_minimize: frozenset[AppSelector] = frozenset()
+    block_end_hide: frozenset[AppSelector] = frozenset()
+    block_end_quit: frozenset[AppSelector] = frozenset()
+    block_end_skip: frozenset[AppSelector] = frozenset()
 
     # Calendar (watch mode)
     calendar_enabled: bool = True
@@ -60,9 +63,32 @@ class AppConfig:
     calendar_stroke_b: float = 0.45
 
     @classmethod
-    def from_mapping(cls, env: Mapping[str, str]) -> AppConfig:
-        """Build from a string mapping (merged process env over .env values)."""
-        return cls(
+    def from_mapping(
+        cls,
+        env: Mapping[str, str],
+        manifest: dict[int, str] | None = None,
+    ) -> tuple[AppConfig, list[str]]:
+        """Build from a string mapping (merged process env over .env values).
+
+        Returns (config, warnings) where warnings are stale manifest index tokens
+        (e.g. ["5", "7"] when those indices don't appear in the manifest).
+        Pass manifest=None or omit it to skip index resolution.
+        """
+        manifest = manifest or {}
+        minimize_sel, w1 = resolve_block_end_csv(env.get("BLOCK_END_MINIMIZE", ""), manifest)
+        hide_sel, w2 = resolve_block_end_csv(env.get("BLOCK_END_HIDE", ""), manifest)
+        quit_sel, w3 = resolve_block_end_csv(env.get("BLOCK_END_QUIT", ""), manifest)
+        skip_sel, w4 = resolve_block_end_csv(env.get("BLOCK_END_SKIP", ""), manifest)
+        warnings = [
+            f"BLOCK_END_MINIMIZE index {t} not in apps.manifest — run ./run apps" for t in w1
+        ] + [
+            f"BLOCK_END_HIDE index {t} not in apps.manifest — run ./run apps" for t in w2
+        ] + [
+            f"BLOCK_END_QUIT index {t} not in apps.manifest — run ./run apps" for t in w3
+        ] + [
+            f"BLOCK_END_SKIP index {t} not in apps.manifest — run ./run apps" for t in w4
+        ]
+        cfg = cls(
             stroke_width=_as_float(env, "STROKE_WIDTH", 6.0),
             red_zone_fraction=_as_float(env, "RED_ZONE_FRACTION", 0.05),
             pulse_before_secs=_as_float(env, "PULSE_BEFORE_SECS", 120.0),
@@ -81,10 +107,10 @@ class AppConfig:
             shake_smooth=_as_float(env, "SHAKE_SMOOTH", 14.0),
             block_on_end=_as_bool(env, "BLOCK_ON_END", False),
             block_end_default=_as_action(env, "BLOCK_END_DEFAULT", "minimize"),
-            block_end_minimize=_as_csv(env, "BLOCK_END_MINIMIZE"),
-            block_end_hide=_as_csv(env, "BLOCK_END_HIDE"),
-            block_end_quit=_as_csv(env, "BLOCK_END_QUIT"),
-            block_end_skip=_as_csv(env, "BLOCK_END_SKIP"),
+            block_end_minimize=minimize_sel,
+            block_end_hide=hide_sel,
+            block_end_quit=quit_sel,
+            block_end_skip=skip_sel,
             calendar_enabled=_as_bool(env, "CALENDAR_ENABLED", True),
             calendar_poll_seconds=_as_float(env, "CALENDAR_POLL_SECONDS", 15.0),
             calendar_window_minutes=_as_float(env, "CALENDAR_WINDOW_MINUTES", 10.0),
@@ -93,6 +119,7 @@ class AppConfig:
             calendar_stroke_g=_as_float(env, "CALENDAR_STROKE_G", 0.85),
             calendar_stroke_b=_as_float(env, "CALENDAR_STROKE_B", 0.45),
         )
+        return cfg, warnings
 
     def merge(self, **overrides: object) -> AppConfig:
         """Return a copy with non-None overrides applied.
@@ -119,13 +146,6 @@ def _as_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _as_csv(env: Mapping[str, str], key: str) -> frozenset[str]:
-    raw = (env.get(key) or "").strip()
-    if not raw:
-        return frozenset()
-    return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _as_action(env: Mapping[str, str], key: str, default: str) -> str:

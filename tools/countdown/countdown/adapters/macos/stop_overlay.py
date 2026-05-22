@@ -93,6 +93,12 @@ class StopBlockView(AppKit.NSView):
     def becomeFirstResponder(self) -> bool:
         return True
 
+    def acceptsFirstMouse_(self, event) -> bool:
+        # Deliver the click even when our app is not yet the active app.
+        # Without this, the first click activates the app but mouseDown_ is
+        # never called — the user must click twice to dismiss.
+        return True
+
     def keyDown_(self, event) -> None:
         if self._controller is not None and event.keyCode() in (36, 53):
             self._controller.dismiss()
@@ -192,9 +198,28 @@ class MacStopOverlay:
             )
             for screen in AppKit.NSScreen.screens()
         ]
-        AppKit.NSApp.activateIgnoringOtherApps_(True)
+        # Order front first so the windows are visible during activation.
         for window in self._windows:
             window.orderFrontRegardless()
+        # Use the macOS 14+ activate() API if available; fall back to the
+        # deprecated ignoring-other-apps form on older systems.
+        if hasattr(AppKit.NSApp, "activate") and callable(
+            getattr(AppKit.NSApp, "activate", None)
+        ):
+            try:
+                AppKit.NSApp.activate()
+            except Exception:
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+        else:
+            AppKit.NSApp.activateIgnoringOtherApps_(True)
+        # Give the run loop one cycle to process the activation event before
+        # trying to make the window key (makeKeyAndOrderFront_ requires the
+        # app to be active).
+        AppKit.NSRunLoop.currentRunLoop().runMode_beforeDate_(
+            AppKit.NSDefaultRunLoopMode,
+            AppKit.NSDate.dateWithTimeIntervalSinceNow_(0.05),
+        )
+        for window in self._windows:
             window.makeKeyAndOrderFront_(None)
         if self._windows:
             self._windows[0].makeFirstResponder_(self._windows[0].contentView())

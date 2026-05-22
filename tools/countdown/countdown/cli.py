@@ -10,7 +10,7 @@ import argparse
 import datetime as dt
 import sys
 
-from countdown.composition import build_config, run_one_shot, run_watch
+from countdown.composition import build_config, run_apps, run_one_shot, run_watch
 from countdown.domain.timespec import parse_quick_input
 
 
@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "watch":
         return _run_watch(argv[1:])
+    if argv and argv[0] == "apps":
+        return run_apps()
     return _run_countdown(argv)
 
 
@@ -27,7 +29,10 @@ def _run_watch(argv: list[str]) -> int:
     )
     _add_config_args(parser)
     args = parser.parse_args(argv)
-    return run_watch(build_config(**_config_overrides(args)))
+    config, warnings = build_config(**_config_overrides(args))
+    for w in warnings:
+        print(w, file=sys.stderr)
+    return run_watch(config)
 
 
 def _run_countdown(argv: list[str]) -> int:
@@ -47,7 +52,9 @@ def _run_countdown(argv: list[str]) -> int:
     )
     _add_config_args(parser)
     args = parser.parse_args(argv)
-    config = build_config(**_config_overrides(args))
+    config, warnings = build_config(**_config_overrides(args))
+    for w in warnings:
+        print(w, file=sys.stderr)
     now = dt.datetime.now()
 
     if args.for_minutes is not None:

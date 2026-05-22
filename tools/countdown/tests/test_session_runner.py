@@ -4,6 +4,7 @@ import datetime as dt
 
 from countdown import ports
 from countdown.app.session_runner import SessionRunner
+from countdown.domain.apps import RunningApp
 from countdown.domain.config import AppConfig
 from countdown.domain.session import Session, SessionKind, SessionState
 
@@ -37,11 +38,13 @@ class Harness:
         self.overlay = FakeOverlay()
         self.stop_overlay = FakeStopOverlay()
         self.shaker = FakeShaker(available=shaker_available)
+        _notes = RunningApp(bundle_id="com.apple.Notes", display_name="Notes")
+        _finder = RunningApp(bundle_id="com.apple.finder", display_name="Finder", is_foreground=True)
         self.app_control = FakeAppControl(
             frontmost=42,
-            running=["Notes"],
-            foreground=["Notes", "Finder"],
-            names={42: "Notes"},
+            running=[_notes],
+            foreground=[_notes, _finder],
+            apps_by_pid={42: _notes},
         )
         self.block_executor = FakeBlockExecutor(counts={"minimize": 2, "hide": 0, "quit": 0})
         self.signals = FakeSignals()
@@ -160,7 +163,10 @@ def test_finish_button_with_block_on_end_enters_blocking():
 def test_focus_returns_to_prior_app_when_not_in_plan():
     # When the frontmost app is NOT in the block-end plan, focus returns to it.
     h = Harness(block_on_end=True, duration=2.0)
-    new_ctrl = FakeAppControl(frontmost=77, running=[], foreground=[], names={77: "Safari"})
+    _safari = RunningApp(bundle_id="com.apple.Safari", display_name="Safari")
+    new_ctrl = FakeAppControl(
+        frontmost=77, running=[], foreground=[], apps_by_pid={77: _safari}
+    )
     h.runner.app_control = new_ctrl
     h.runner.pump()
     h.clock.advance(5.0)

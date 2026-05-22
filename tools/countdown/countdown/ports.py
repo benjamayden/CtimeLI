@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
+from .domain.apps import RunningApp
 from .domain.blockend import BlockAction
 from .domain.calendar import CalendarEvent
 from .domain.session import RenderFrame
@@ -121,7 +122,8 @@ class AppControl(Protocol):
     def frontmost_pid(self) -> int | None:
         """Frontmost app PID; None if it is our own process."""
 
-    def app_name_for_pid(self, pid: int) -> str | None: ...
+    def app_for_pid(self, pid: int) -> RunningApp | None:
+        """RunningApp for a PID; None if not found."""
 
     def activate_pid(self, pid: int) -> bool:
         """Bring an app to the front; False if it is gone."""
@@ -129,11 +131,11 @@ class AppControl(Protocol):
     def activate_finder(self) -> None:
         """Fallback focus target after a tidy."""
 
-    def running_app_names(self) -> list[str]:
+    def running_apps(self) -> list[RunningApp]:
         """Every regular GUI app, including windowless ones."""
 
-    def foreground_app_names(self) -> list[str]:
-        """Apps with a visible foreground presence."""
+    def foreground_apps(self) -> list[RunningApp]:
+        """Apps with a visible foreground presence (background only = false)."""
 
     def set_activation_policy(self, policy: ActivationPolicy) -> None: ...
 

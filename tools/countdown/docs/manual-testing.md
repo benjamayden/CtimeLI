@@ -182,6 +182,81 @@ Restore permission afterwards.
 
 ---
 
+## 11. Block-end app manifest (numbered indices)
+
+Run after any change to `block_executor.py`, `app_control.py`, `cli.py apps`,
+`domain/manifest.py`, or `domain/blockend.py`. Budget **3 minutes**.
+
+### 11a. Generate the app list
+
+Open two or three regular GUI apps (e.g. Safari, Notes, TextEdit) **before**
+running:
+
+```sh
+./run apps
+```
+
+**Watch for:**
+- [ ] Numbered table prints: index, display name, bundle ID
+- [ ] Footer shows copy-paste hint: `BLOCK_END_QUIT=1,2,3` (example indices)
+- [ ] `tools/countdown/apps.manifest` created (or updated) next to `.env`
+- [ ] Re-running `./run apps` overwrites the manifest (indices may shift)
+
+**Failure signs:** empty table with apps visibly running; manifest missing; crash.
+
+### 11b. Block-on-end via numeric index
+
+Pick an index from §11a for an app that is **not** your terminal (e.g. Notes = `2`).
+
+```sh
+BLOCK_END_QUIT=2 ./run 0.1 --block-on-end
+```
+
+Focus the target app before the timer ends.
+
+**Watch for:**
+- [ ] At zero: stop overlay → dismiss → terminal prints `Block end: quit 1 app.`
+- [ ] The app matching index `2` in the current manifest is quit/hidden/minimised
+- [ ] Terminal regains focus after cleanup
+
+### 11c. Stale index warning
+
+```sh
+BLOCK_END_QUIT=99 ./run 0.1 --block-on-end
+```
+
+**Watch for:**
+- [ ] One startup warning naming index `99` and suggesting `./run apps`
+- [ ] Timer still runs; no crash
+
+### 11d. Legacy display-name config (backward compat)
+
+Confirm §6 still works — typed names must not regress:
+
+```sh
+BLOCK_END_HIDE=safari ./run 0.1 --block-on-end
+```
+
+Open Safari first.
+
+**Watch for:**
+- [ ] Safari hidden via display-name/alias match (same as before §11)
+- [ ] Other foreground apps minimised (default)
+
+### 11e. Mixed numeric + legacy
+
+With a valid manifest and Safari running:
+
+```sh
+BLOCK_END_HIDE=1 BLOCK_END_QUIT=safari ./run 0.1 --block-on-end
+```
+
+**Watch for:**
+- [ ] Both selectors applied — one app hidden by index, Safari quit by name
+- [ ] Terminal summary reflects both actions
+
+---
+
 ## Quick smoke (30 seconds)
 
 If you only have time for one check:

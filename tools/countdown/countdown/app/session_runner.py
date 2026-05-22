@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 from countdown import ports
+from countdown.domain.apps import AppSelector
 from countdown.domain.blockend import block_end_summary, plan_block_end
 from countdown.domain.session import FRAME_INTERVAL, Session, SessionState
 from countdown.domain.shake import ShakeMotion
@@ -37,7 +38,7 @@ class SessionRunner:
         app_control: ports.AppControl,
         block_executor: ports.BlockEndExecutor,
         signals: ports.SignalListener,
-        extra_skip: frozenset[str] = frozenset(),
+        extra_skip: frozenset[AppSelector] = frozenset(),
     ) -> None:
         self.session = session
         self.clock = clock
@@ -150,8 +151,8 @@ class SessionRunner:
         self.stop_overlay.hide()
         self.overlay.hide()
         plan = plan_block_end(
-            self.app_control.running_app_names(),
-            self.app_control.foreground_app_names(),
+            self.app_control.running_apps(),
+            self.app_control.foreground_apps(),
             self.session.config,
             self.extra_skip,
         )
@@ -159,15 +160,18 @@ class SessionRunner:
         summary = block_end_summary(counts)
         if summary:
             self.logger.info(summary)
-        self._restore_focus({name for name, _ in plan})
+        self._restore_focus({bundle_id for bundle_id, _ in plan})
 
-    def _restore_focus(self, acted_names: set[str]) -> None:
+    def _restore_focus(self, acted_bundle_ids: set[str]) -> None:
         """Return focus to where it was — unless that app was just tidied."""
         pid = self._restore_focus_pid
         if pid is not None:
-            name = self.app_control.app_name_for_pid(pid)
-            if name and name not in acted_names and self.app_control.activate_pid(pid):
-                return
+            app = self.app_control.app_for_pid(pid)
+            if app is not None:
+                bundle_id = app.bundle_id
+                if bundle_id is None or bundle_id not in acted_bundle_ids:
+                    if self.app_control.activate_pid(pid):
+                        return
         self.app_control.activate_finder()
 
     def _teardown(self) -> None:
