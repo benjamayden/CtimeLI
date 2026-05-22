@@ -16,7 +16,6 @@ from typing import Protocol, runtime_checkable
 
 from .domain.blockend import BlockAction
 from .domain.calendar import CalendarEvent
-from .domain.colors import RGB
 from .domain.session import RenderFrame
 
 
@@ -71,10 +70,11 @@ class CountdownOverlay(Protocol):
         """Create one click-through overlay window per display."""
 
     def render(self, frame: RenderFrame) -> None:
-        """Draw `frame` on every display."""
+        """Draw `frame` on every display.
 
-    def set_base_color(self, color: RGB) -> None:
-        """Change the stroke base hue (calendar snap recolours mid-session)."""
+        `frame.color` is the final stroke colour (red-zone blend and any
+        calendar recolour already applied) — the overlay never computes colour.
+        """
 
     def finish_requested(self) -> bool:
         """True once the user clicked the HUD Finish button (latched)."""

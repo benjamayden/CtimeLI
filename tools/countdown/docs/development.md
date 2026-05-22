@@ -40,11 +40,14 @@ expected outputs.
 - `test_curves.py` — `pulse_opacity` (before/at/after window; ramp clamp),
   `pulse_spread` (linear vs `ramp_power=3`), `shake_intensity` (the 3 s window).
 - `test_colors.py` — `stroke_color_for_fraction` above/at/below `red_zone`.
+- `test_shake.py` — `ShakeMotion`: zero rest, amplitude bound, `reset`.
 - `test_timespec.py` — **every row of the parsing table in
   [`domain.md`](domain.md) §4**, including the ambiguous-hour and error cases.
 - `test_calendar.py` — `calendar_block_target` (skips when `block_at <= now`).
 - `test_blockend.py` — `plan_block_end`: precedence, alias expansion, the
   two-pass running-vs-foreground rule, skip sets.
+- `test_config.py` — `AppConfig.from_mapping` parsing and `merge` (unknown
+  override keys rejected — #6).
 - `test_session.py` — **the whole transition table** ([`domain.md`](domain.md)
   §7): `RUNNING→BLOCKING` vs `→DONE` on `block_on_end`, `finish()` parity with
   zero, retarget never shrinking `total_seconds`, terminal-state no-ops.
@@ -60,6 +63,8 @@ port, see [`ports.md`](ports.md) summary table). A `SessionRunner` test:
 
 This catches orchestration bugs (does zero trigger the stop overlay? does
 `CLEANUP` run the plan exactly once?) with **no Mac and no display**.
+`test_session_runner.py` covers the SessionRunner lifecycle; `test_watch_runner.py`
+covers quick-add input, quit, and calendar auto-start / dedup.
 
 ### Tier 3 — Manual macOS checklist (the unverified surface)
 The macOS adapters cannot run on CI. Verify by hand on a Mac after any change
@@ -124,7 +129,7 @@ old code or old notes.
 | `countdown.py` | `_action_for_process`, alias tables, `_expand_block_end_names` | `domain/blockend.py` |
 | `countdown.py` | `apply_block_end_actions` (planning half) | `domain/blockend.py::plan_block_end` |
 | `countdown.py` | `apply_block_end_actions` (execution half) | `adapters/macos/block_executor.py` |
-| `config.py` | `AppConfig`, `merge_cli`, env parsers | `config.py` |
+| `config.py` | `AppConfig`, `merge_cli` → `merge`, env parsers | `domain/config.py` *(pure value object)* |
 | `config.py` | `load_dotenv` | `adapters/system/dotenv.py` *(no env mutation, #5)* |
 | `countdown.py` | `CountdownApp` (lifecycle/state) | `domain/session.py` + `app/session_runner.py` |
 | `countdown.py` | `Watcher` | `app/watch_runner.py` |
@@ -132,7 +137,7 @@ old code or old notes.
 | `countdown.py` | `CountdownWindow`, `CountdownView`, `_draw_*` | `adapters/macos/overlay.py` |
 | `countdown.py` | `CountdownHUDWindow`, `FinishControl` | `adapters/macos/hud.py` |
 | `countdown.py` | `StopBlockWindow/View`, `_StopModalController` | `adapters/macos/stop_overlay.py` |
-| `countdown.py` | `_TimerBridge`, `_pump_run_loop` | `adapters/macos/runloop.py` |
+| `countdown.py` | `_pump_run_loop` | `adapters/macos/runloop.py` (`_TimerBridge` deleted, #11) |
 | `countdown.py` | `_frontmost_pid`, `_activate_pid`, `_running_app_names`, … | `adapters/macos/app_control.py` |
 | `calendar_monitor.py` | `CalendarMonitor` | `adapters/macos/calendar.py` |
 | `countdown.py` | `_enable_stdin_nonblocking`, `_read_stdin_chunk` | `adapters/system/stdin_source.py` *(+restore, #18)* |

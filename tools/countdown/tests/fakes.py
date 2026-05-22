@@ -11,7 +11,6 @@ import datetime as dt
 from countdown import ports
 from countdown.domain.blockend import BlockAction
 from countdown.domain.calendar import CalendarEvent
-from countdown.domain.colors import RGB
 from countdown.domain.session import RenderFrame
 
 
@@ -74,7 +73,6 @@ class FakeOverlay:
 
     def __init__(self) -> None:
         self.frames: list[RenderFrame] = []
-        self.base_colors: list[RGB] = []
         self.shown = False
         self.hidden = False
         self.torn_down = False
@@ -85,9 +83,6 @@ class FakeOverlay:
 
     def render(self, frame: RenderFrame) -> None:
         self.frames.append(frame)
-
-    def set_base_color(self, color: RGB) -> None:
-        self.base_colors.append(color)
 
     def finish_requested(self) -> bool:
         return self.finish

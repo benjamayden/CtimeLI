@@ -229,7 +229,7 @@ class WatchRunner:
             event_id=event.event_id,
             event_title=event.title,
         ):
-            self._current.overlay.set_base_color(session.base_color)
+            # The recolour flows through RenderFrame.color on the next tick.
             self.logger.info(f"Calendar → {block_at:%H:%M} ({event.title})")
 
     def _pending_event(self) -> CalendarEvent | None:

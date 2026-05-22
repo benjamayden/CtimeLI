@@ -63,7 +63,6 @@ def test_setup_shows_overlay_and_renders_a_frame():
     h = Harness(duration=60.0)
     assert h.runner.pump() is True
     assert h.overlay.shown is True
-    assert h.overlay.base_colors  # base colour pushed before show
     assert ports.ActivationPolicy.ACCESSORY in h.app_control.policies
     assert len(h.overlay.frames) == 1
 

@@ -66,20 +66,20 @@ assertions.
 
 ## `FrameScheduler`
 
-**Purpose** — drive the ~60 Hz render loop without the app knowing about
-`NSTimer` or `NSRunLoop`.
+**Purpose** — yield to the host UI event loop so overlays repaint, without the
+app knowing about `NSRunLoop`. The runner owns the frame loop and drives ticks
+itself; this port only drains pending platform UI events between ticks.
 
 | Method | Contract |
 |--------|----------|
-| `start(on_frame)` | Begin invoking `on_frame()` at ~`FRAME_INTERVAL` (1/60 s). |
-| `pump(seconds)` | Process pending UI events for up to `seconds`. Lets a cooperative loop (watch mode) yield to the GUI. |
-| `stop()` | Stop ticking; release the timer. Idempotent. |
+| `pump(seconds)` | Process pending UI events for up to `seconds`. The runner calls this once per frame so a cooperative loop yields to the GUI. |
+| `stop()` | Release any run-loop resources. Idempotent. |
 
-**Pre** — `start` called once per session.
 **Failure** — none; on a headless port `pump` is a `sleep`.
-**Adapter** — `macos/runloop.py` — `NSTimer` on `NSRunLoopCommonModes` +
-`NSRunLoop.runMode:beforeDate:`. **Fake** — `FakeScheduler` whose `pump` is a
-no-op and whose frames the test drives by hand.
+**Adapter** — `macos/runloop.py::MacScheduler` — `NSRunLoop.runMode:beforeDate:`
+over the event-tracking and default modes. No `NSTimer` is needed — the runner
+ticks (edge-cases #11). **Fake** — `FakeScheduler` whose `pump` is a no-op and
+whose frames the test drives by hand.
 
 ---
 
@@ -91,9 +91,14 @@ no-op and whose frames the test drives by hand.
 |--------|----------|
 | `show()` | Create one borderless, click-through, all-Spaces window per display, above normal windows. |
 | `render(frame: RenderFrame)` | Draw `frame` on every display: stroke length = `frame.fraction` of the perimeter, colour `frame.color`, glow from `pulse_opacity/spread/phase`. |
-| `set_base_color(rgb)` | Change the stroke base hue (calendar snap recolours mid-session). |
+| `finish_requested() -> bool` | `True` once the user has clicked the HUD Finish button (latched). |
 | `hide()` | Order the windows out (used while the stop overlay is up). |
 | `teardown()` | Close and release everything. Idempotent. |
+
+There is deliberately **no `set_base_color`**: `RenderFrame.color` already
+carries the final stroke colour (the red-zone blend and any calendar recolour
+are applied in the domain), so a mid-session recolour simply flows through the
+next `render`. This keeps `RenderFrame` the *whole* UI contract (invariant #6).
 
 **Pre** — `render` only between `show` and `teardown`.
 **Post** — `render` is pure output; it never blocks and never reads state back.

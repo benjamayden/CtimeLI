@@ -112,6 +112,34 @@ The original kept `pulse_intensity` as a "deprecated alias" that just called
 
 ---
 
+## 2b. Wiggle motion — `domain/shake.py`
+
+`shake_intensity` (above) gives a 0..1 *strength*. Turning that into the actual
+`(dx, dy)` pixel offset is the pure, stateful `ShakeMotion`. It is pure (no I/O)
+but holds state across frames (a phase accumulator + smoothed offset). The
+`WindowShaker` adapter only *applies* the offset this produces, and the
+standalone shake-tuning harness drives this same class — so the wiggle feel is
+defined in exactly one place (DRY, edge-cases #10).
+
+`ShakeMotion(cfg)` exposes:
+- `reset()` — drop all motion state (call when the wiggle window closes).
+- `offset(intensity, dt) -> (dx, dy)`:
+```
+if intensity <= 0:  reset(); return (0, 0)
+phase    += dt * shake_speed * (0.4 + intensity * 0.6)
+wave      = sin(phase)*0.65 + sin(phase*0.55 + 0.8)*0.35      # |wave| <= 1
+target_dx = shake_max_x * wave * intensity * sin(phase * shake_speed_x)
+target_dy = shake_max_y * wave * intensity * cos(phase * shake_speed_y + 0.4)
+dx        = lerp(dx, target_dx, dt, shake_smooth)
+dy        = lerp(dy, target_dy, dt, shake_smooth)
+return (dx, dy)
+```
+Two summed sines give an organic, non-repeating wobble; the `lerp` smooths it.
+Because `|wave|`, `intensity` and `|sin/cos|` are all ≤ 1, the offset is bounded
+by `±shake_max_x` / `±shake_max_y`.
+
+---
+
 ## 3. Colours — `domain/colors.py`
 
 ### `RGB`

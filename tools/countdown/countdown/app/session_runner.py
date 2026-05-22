@@ -105,7 +105,6 @@ class SessionRunner:
         self._setup_done = True
         self.session.start()
         self.app_control.set_activation_policy(ports.ActivationPolicy.ACCESSORY)
-        self.overlay.set_base_color(self.session.base_color)
         self.overlay.show()
         self._last_tick = self.clock.now()
 

@@ -63,7 +63,7 @@ Architecture). The goals, in priority order:
 
 | Layer | May import | Must NOT import |
 |-------|-----------|-----------------|
-| `domain/` | stdlib only (`math`, `datetime`, `re`, `dataclasses`, `enum`) | ports, app, adapters, PyObjC |
+| `domain/` | stdlib (`math`, `datetime`, `re`, `dataclasses`, `enum`) + sibling `domain/` modules | ports, app, adapters, PyObjC |
 | `ports.py` | `domain/`, `typing` | app, adapters |
 | `app/` | `domain/`, `ports.py` | adapters, PyObjC, `argparse` |
 | `adapters/` | `domain/`, `ports.py`, platform SDKs | app, `cli.py` |
@@ -283,14 +283,16 @@ tools/countdown/
   requirements.txt            # PyObjC frameworks (macOS only)
   .env.example                # documented config template
   countdown/
+    __main__.py               # enables `python -m countdown`
     cli.py                    # argparse; dispatches one-shot vs watch
     composition.py            # composition root — builds & injects adapters
-    config.py                 # AppConfig dataclass + env/CLI merge
     ports.py                  # all Protocol interfaces
     domain/
       math.py                 # smoothstep, lerp, format_duration, clamp
+      config.py               # AppConfig value object + env/CLI merge (pure)
       curves.py               # pulse_opacity, pulse_spread, shake_intensity
       colors.py               # RGB type, stroke_color_for_fraction
+      shake.py                # ShakeMotion — pure wiggle-offset generator
       timespec.py             # parse_target_time, parse_quick_input
       session.py              # SessionState, SessionKind, Session, RenderFrame
       calendar.py             # CalendarEvent, calendar_block_target
@@ -306,7 +308,7 @@ tools/countdown/
         stdin_source.py       # non-blocking line reader
         signals.py            # SIGINT handler
       macos/
-        runloop.py            # NSRunLoop pump + NSTimer FrameScheduler
+        runloop.py            # NSRunLoop pump (FrameScheduler)
         overlay.py            # CountdownOverlay: stroke + edge glow windows
         hud.py                # timer label + Finish button
         stop_overlay.py       # full-screen block-on-end modal
@@ -317,6 +319,9 @@ tools/countdown/
   tests/                      # pytest — domain exhaustive, app via fakes
   docs/                       # this folder
 ```
+
+`AppConfig` lives in `domain/` because it is a pure value object the domain
+itself reads; only its *file* loading is an adapter (`system/dotenv.py`).
 
 The migration map from the old symbols to these modules is in
 [`development.md`](development.md) §"Symbol migration map".

@@ -46,7 +46,9 @@ drives the real `WindowShaker` adapter.
 
 ### #11 — `_TimerBridge` defined twice · Fixed
 The PyObjC `NSTimer` target class existed in both `countdown.py` and
-`shake_test.py`. **Fix**: one definition in `adapters/macos/runloop.py`.
+`shake_test.py`. **Fix**: deleted entirely. The runner owns the frame loop and
+drives ticks itself; `MacScheduler` only pumps the run loop, so no `NSTimer`
+(and no bridge class) is needed.
 
 ### #14 — Retarget block copy-pasted · Fixed
 `Watcher._poll_calendar` and `Watcher._sync_calendar_to_nearest` contained the
