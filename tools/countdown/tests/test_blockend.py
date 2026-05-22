@@ -70,6 +70,32 @@ def test_plan_does_not_assign_an_app_twice():
     assert plan.count(("Notes", BlockAction.MINIMIZE)) == 1
 
 
+def test_plan_background_app_not_in_explicit_list_gets_no_action():
+    # Pass 2 (default) only sweeps foreground apps — a background app not in any
+    # explicit list must not be touched (the two-pass distinction from docs/domain.md §6).
+    cfg = AppConfig(block_end_default="minimize")
+    plan = plan_block_end(
+        running_apps=["Notes", "Spotify"],
+        foreground_apps=["Notes"],
+        cfg=cfg,
+    )
+    acted = {name for name, _ in plan}
+    assert "Spotify" not in acted
+    assert "Notes" in acted
+
+
+def test_plan_explicit_list_acts_on_background_app():
+    # Pass 1 fires on every running app — an explicit quit/hide/minimize config
+    # applies even if the app is not in the foreground.
+    cfg = AppConfig(block_end_quit=frozenset({"spotify"}))
+    plan = plan_block_end(
+        running_apps=["Spotify"],
+        foreground_apps=[],
+        cfg=cfg,
+    )
+    assert ("Spotify", BlockAction.QUIT) in plan
+
+
 def test_summary_phrasing():
     assert block_end_summary({"minimize": 3, "hide": 0, "quit": 1}) == (
         "Block end: minimized 3 windows, quit 1 app."

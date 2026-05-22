@@ -60,6 +60,21 @@ def test_invalid_input_raises(bad):
         parse_target_time(bad, NOW)
 
 
+def test_24h_time_rolls_to_tomorrow_when_past():
+    # A 24-hour clock time that has already passed today must roll to tomorrow.
+    now_evening = dt.datetime(2026, 5, 21, 19, 0, 0)
+    result = parse_target_time("18:00", now_evening)
+    assert result.day == 22
+    assert result.hour == 18
+
+
+def test_meridiem_past_time_rolls_to_tomorrow():
+    # 7am has already passed at 14:30; the existing test only checks hour, not day.
+    result = parse_target_time("7am", NOW)
+    assert result.day == 22
+    assert result.hour == 7
+
+
 def test_empty_quick_input_raises():
     with pytest.raises(ValueError, match="Empty input"):
         parse_quick_input("", NOW)

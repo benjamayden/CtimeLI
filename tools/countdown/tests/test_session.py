@@ -120,6 +120,25 @@ def test_terminal_states_ignore_events():
     assert session.state is SessionState.INTERRUPTED
 
 
+def test_retarget_updates_kind_and_event_metadata():
+    session = make_session(duration=120.0, kind=SessionKind.MANUAL)
+    session.start()
+    event_start = STARTED + dt.timedelta(seconds=90)
+    applied = session.retarget(
+        STARTED + dt.timedelta(seconds=60),
+        STARTED + dt.timedelta(seconds=5),
+        kind=SessionKind.CALENDAR,
+        event_start=event_start,
+        event_id="evt-1",
+        event_title="Standup",
+    )
+    assert applied is True
+    assert session.kind is SessionKind.CALENDAR
+    assert session.event_id == "evt-1"
+    assert session.event_title == "Standup"
+    assert session.event_start == event_start
+
+
 def test_base_color_by_kind():
     assert make_session(kind=SessionKind.MANUAL).base_color == STROKE_BLUE
     cal = make_session(kind=SessionKind.CALENDAR)

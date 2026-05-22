@@ -47,10 +47,11 @@ _ACCEPTED = (
 class EventKitCalendar:
     """EventKit-backed calendar source."""
 
-    def __init__(self, logger: ports.Logger) -> None:
+    def __init__(self, logger: ports.Logger, *, store=None) -> None:
         self._logger = logger
-        self._store = None
-        self._access_ok = False
+        # An injected store (e.g. from a test) is treated as pre-authorized.
+        self._store = store
+        self._access_ok = store is not None
         self._warned = False
 
     def ensure_access(self) -> bool:

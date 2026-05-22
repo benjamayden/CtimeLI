@@ -131,6 +131,47 @@ def test_shake_skipped_when_accessibility_unavailable():
     assert h.shaker.applied == []
 
 
+def test_interrupt_while_blocking_still_runs_cleanup():
+    # Ctrl+C during BLOCKING must route through CLEANUP so windows are still tidied
+    # (documented invariant in docs/domain.md §7 — no runner test existed for this).
+    h = Harness(block_on_end=True, duration=2.0)
+    h.runner.pump()
+    h.clock.advance(5.0)
+    h.runner.pump()       # tick at zero -> BLOCKING
+    h.signals.trigger()   # Ctrl+C fires
+    h.runner.pump()       # interrupt() -> CLEANUP (not INTERRUPTED)
+    h.runner.pump()       # CLEANUP runs -> DONE
+    assert h.session.state is SessionState.DONE
+    assert h.block_executor.executed is not None
+    assert h.session.interrupted is True
+
+
+def test_finish_button_with_block_on_end_enters_blocking():
+    # Finish button must honour block_on_end (features.md §6).
+    h = Harness(block_on_end=True, duration=60.0)
+    h.runner.pump()
+    h.overlay.finish = True
+    h.runner.pump()       # finish() -> BLOCKING
+    assert h.session.state is SessionState.BLOCKING
+    assert h.stop_overlay.shown_lines is not None
+    assert h.overlay.hidden is True
+
+
+def test_focus_returns_to_prior_app_when_not_in_plan():
+    # When the frontmost app is NOT in the block-end plan, focus returns to it.
+    h = Harness(block_on_end=True, duration=2.0)
+    new_ctrl = FakeAppControl(frontmost=77, running=[], foreground=[], names={77: "Safari"})
+    h.runner.app_control = new_ctrl
+    h.runner.pump()
+    h.clock.advance(5.0)
+    h.runner.pump()       # -> BLOCKING (captures frontmost pid 77)
+    h.stop_overlay.dismiss = True
+    h.runner.pump()       # -> CLEANUP
+    h.runner.pump()       # cleanup runs -> DONE
+    assert new_ctrl.activated_pids == [77]
+    assert new_ctrl.finder_activations == 0
+
+
 def test_focus_returns_to_prior_app_after_cleanup():
     h = Harness(block_on_end=True, duration=2.0)
     h.runner.pump()
