@@ -89,6 +89,7 @@ class CountdownHUDWindow(AppKit.NSWindow):
         )
         if self is None:
             return None
+        self._button_down = False
         self.setLevel_(AppKit.NSStatusWindowLevel + 3)
         self.setOpaque_(False)
         self.setBackgroundColor_(AppKit.NSColor.clearColor())
@@ -130,6 +131,22 @@ class CountdownHUDWindow(AppKit.NSWindow):
 
     def canBecomeMainWindow(self) -> bool:
         return False
+
+    @objc.python_method
+    def poll_finish_click(self, state: HudState) -> None:
+        """Polling fallback — fires when mouseDown_ is missed (non-key window)."""
+        btn_pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+        if not btn_pressed:
+            self._button_down = False
+            return
+        if self._button_down or self._finish_btn.isHidden():
+            return
+        self._button_down = True
+        point = AppKit.NSEvent.mouseLocation()
+        btn_rect = self._finish_btn.convertRect_toView_(self._finish_btn.bounds(), None)
+        screen_rect = self.convertRectToScreen_(btn_rect)
+        if AppKit.NSMouseInRect(point, screen_rect, False):
+            state.finish_requested = True
 
     def setLabel_(self, label: str) -> None:
         self._label.setStringValue_(label)

@@ -22,10 +22,13 @@ def calendar_block_target(
 ) -> dt.datetime | None:
     """When the countdown should hit zero for an event.
 
-    The block fires `calendar_block_before_mins` before the event, leaving a
-    buffer to arrive. Returns None if that moment is already past.
+    Normally fires `calendar_block_before_mins` before the event. If that
+    buffer has already passed but the event hasn't started, fires to the event
+    start itself. Returns None only if the event has already started.
     """
     block_at = event_start - dt.timedelta(minutes=cfg.calendar_block_before_mins)
-    if block_at <= now:
-        return None
-    return block_at
+    if block_at > now:
+        return block_at
+    if event_start > now:
+        return event_start  # buffer passed but event hasn't started — count to event
+    return None

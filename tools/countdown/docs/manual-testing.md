@@ -85,6 +85,7 @@ Click the **Finish** button in the HUD within the first few seconds.
 
 **Watch for:**
 - [ ] At zero: stroke/HUD hide, every screen covered by a dark "It's time to stop." overlay
+- [ ] Cursor is hidden while the overlay is up; reappears immediately on dismissal
 - [ ] Clicking in the first ~0.6 s does nothing (dismiss lockout)
 - [ ] After the lockout, clicking anywhere / pressing Return / pressing Escape dismisses it
 - [ ] Terminal prints `Block end: minimized N windows.` (or similar)

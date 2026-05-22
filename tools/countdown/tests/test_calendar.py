@@ -15,13 +15,31 @@ def test_block_target_is_before_the_event():
     assert block_at == event_start - dt.timedelta(minutes=7)
 
 
-def test_block_target_is_none_when_already_past():
-    # Event in 5 min, block fires 7 min before -> block_at is 2 min ago.
+def test_late_start_returns_event_start():
+    # Event in 5 min, block fires 7 min before → block_at is 2 min ago.
     event_start = NOW + dt.timedelta(minutes=5)
-    assert calendar_block_target(event_start, CFG, NOW) is None
+    result = calendar_block_target(event_start, CFG, NOW)
+    assert result == event_start
 
 
-def test_block_target_none_at_exact_boundary():
-    # block_at exactly == now must be skipped (<=).
+def test_late_start_buffer_fully_elapsed():
+    # Event in 3 min, block fires 7 min before → block_at is 4 min ago.
+    event_start = NOW + dt.timedelta(minutes=3)
+    result = calendar_block_target(event_start, CFG, NOW)
+    assert result == event_start
+
+
+def test_block_target_at_boundary_returns_event_start():
+    # block_at exactly == now: still a late start, count to event itself.
     event_start = NOW + dt.timedelta(minutes=7)
+    result = calendar_block_target(event_start, CFG, NOW)
+    assert result == event_start
+
+
+def test_returns_none_when_event_already_started():
+    event_start = NOW - dt.timedelta(minutes=1)
     assert calendar_block_target(event_start, CFG, NOW) is None
+
+
+def test_returns_none_when_event_starts_exactly_now():
+    assert calendar_block_target(NOW, CFG, NOW) is None

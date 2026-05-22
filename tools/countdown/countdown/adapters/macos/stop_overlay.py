@@ -35,6 +35,7 @@ class _StopModalController(AppKit.NSObject):
         self.dismissed = False
         self._shown_at = time.monotonic()
         self._monitor = None
+        self._button_down = False
         return self
 
     @objc.python_method
@@ -45,6 +46,17 @@ class _StopModalController(AppKit.NSObject):
     def dismiss(self) -> None:
         if self.can_dismiss():
             self.dismissed = True
+
+    @objc.python_method
+    def poll_button_state(self) -> None:
+        """Polling fallback: detect clicks via button state when event monitor misses them."""
+        if self.dismissed or not self.can_dismiss():
+            return
+        if AppKit.NSEvent.pressedMouseButtons() & 1:
+            self._button_down = True
+        elif self._button_down:
+            self._button_down = False
+            self.dismiss()
 
     @objc.python_method
     def install_input_monitor(self) -> None:
@@ -191,6 +203,7 @@ class MacStopOverlay:
         self._windows: list[StopBlockWindow] = []
 
     def show(self, lines: list[str]) -> None:
+        AppKit.NSCursor.hide()
         self._controller = _StopModalController.alloc().init()
         self._windows = [
             StopBlockWindow.alloc().initWithScreen_controller_lines_(
@@ -201,17 +214,10 @@ class MacStopOverlay:
         # Order front first so the windows are visible during activation.
         for window in self._windows:
             window.orderFrontRegardless()
-        # Use the macOS 14+ activate() API if available; fall back to the
-        # deprecated ignoring-other-apps form on older systems.
-        if hasattr(AppKit.NSApp, "activate") and callable(
-            getattr(AppKit.NSApp, "activate", None)
-        ):
-            try:
-                AppKit.NSApp.activate()
-            except Exception:
-                AppKit.NSApp.activateIgnoringOtherApps_(True)
-        else:
-            AppKit.NSApp.activateIgnoringOtherApps_(True)
+        # activateIgnoringOtherApps_ is deprecated on macOS 14+ but is the
+        # only form that reliably steals focus from any frontmost app. The
+        # newer activate() form silently fails when we aren't already active.
+        AppKit.NSApp.activateIgnoringOtherApps_(True)
         # Give the run loop one cycle to process the activation event before
         # trying to make the window key (makeKeyAndOrderFront_ requires the
         # app to be active).
@@ -226,9 +232,12 @@ class MacStopOverlay:
         self._controller.install_input_monitor()
 
     def dismissed(self) -> bool:
+        if self._controller is not None:
+            self._controller.poll_button_state()
         return self._controller is not None and bool(self._controller.dismissed)
 
     def hide(self) -> None:
+        AppKit.NSCursor.unhide()
         if self._controller is not None:
             self._controller.remove_input_monitor()
         for window in self._windows:

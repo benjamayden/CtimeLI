@@ -242,6 +242,10 @@ class MacOverlay:
             hud.setLabel_(frame.label)
 
     def finish_requested(self) -> bool:
+        if not self._hud_state.finish_requested:
+            for hud in self._huds:
+                if hud.isVisible():
+                    hud.poll_finish_click(self._hud_state)
         return self._hud_state.finish_requested
 
     def hide(self) -> None:

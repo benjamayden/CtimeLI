@@ -213,6 +213,93 @@ history — nothing to do with the countdown app actually in the tree. An agent
 picking up cold would be badly misled. **Fix**: `CLAUDE.md` rewritten to
 describe this project and point at `docs/`.
 
+### #30 — `foreground_apps()` used System Events AppleScript · Fixed
+
+The original `foreground_apps()` fired `tell application "System Events" to get
+name of every process whose background only is false`. Two failure modes:
+
+1. **Automation permission** — macOS prompts the first time; if denied or
+   revoked, the call returns `[]` silently, so no windows get the default
+   minimize action.
+2. **`missing value` bundle ID** — when the refactored version tried to also
+   fetch bundle identifiers inline (`bundle identifier of p & "|" & name of p`),
+   processes without a bundle ID caused AppleScript to build a list instead of
+   a string, corrupting the entire output.
+3. **Stale `background only` flag** — an app like Calendar shows
+   `background only = false` even when it has no open window, producing a plan
+   entry that minimizes nothing.
+
+**Fix**: replaced with `Quartz.CGWindowListCopyWindowInfo(
+kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+kCGNullWindowID)`. The window server returns exactly the PIDs that have
+unminimized on-screen windows. No AppleScript, no Automation permission.
+`kCGWindowListExcludeDesktopElements` drops Finder's desktop/wallpaper layer so
+Finder only appears when it has a real folder window open. Bundle IDs come from
+`NSWorkspace` as before.
+
+---
+
+### #31 — `MacStopOverlay` activation and cursor · Fixed
+
+Three related issues in the stop-overlay show path:
+
+1. **`NSApp.activate()` silently fails** — on macOS 14+ the no-argument form
+   requires the app to already be active. When a countdown fires from behind
+   another app, `activate()` does nothing; the overlay is on screen but not key;
+   the local event monitor never fires; clicks do not dismiss the overlay.
+   **Fix**: always use `activateIgnoringOtherApps_(True)` (deprecated but
+   reliable from any frontmost context).
+
+2. **No click fallback** — the event monitor fires only for events delivered to
+   our key window. During the brief activation window the monitor can miss the
+   first click. **Fix**: `_StopModalController.poll_button_state()` is called
+   each frame from `dismissed()`; it uses `NSEvent.pressedMouseButtons() & 1`
+   to detect press-then-release independently of event delivery.
+
+3. **Cursor visible over black overlay** — `NSCursor` is not automatically
+   hidden by a full-screen window. **Fix**: `show()` calls `NSCursor.hide()`;
+   `hide()` calls `NSCursor.unhide()`. Both are balanced by macOS's internal
+   hide counter so a stray `unhide()` on an already-shown cursor is a no-op.
+
+---
+
+### #34 — Finish button click missed on non-key HUD window · Fixed
+
+`FinishControl.mouseDown_` is not reliably delivered when `CountdownHUDWindow`
+cannot become the key window. The same issue as the stop-overlay click (#31).
+**Fix**: `MacOverlay.finish_requested()` calls `poll_finish_click()` on each
+visible HUD window every frame — checks `NSEvent.pressedMouseButtons() & 1`
+and hit-tests the button screen rect. `mouseDown_` remains as the fast path.
+
+---
+
+### #32 — Screen frozen during block-end cleanup · Fixed
+
+`_run_cleanup()` called `stop_overlay.hide()` (which orders the windows out)
+and then immediately entered the synchronous `block_executor.execute()` pipeline
+(AppleScript calls, ~1 s total). `window.close()` enqueues a draw event but the
+run loop never pumped between the close and the AppleScript stall, so the black
+overlay remained visually composited on screen until cleanup finished.
+
+**Fix**: `scheduler.pump(0.05)` is called after both `hide()` calls and before
+`plan_block_end()`/`execute()`. This gives AppKit one run-loop cycle to composite
+the now-closed windows before the blocking I/O begins. Do not remove this pump.
+
+---
+
+### #33 — Calendar late-start silently dropped events · Fixed
+
+`calendar_block_target` returned `None` whenever
+`event_start - block_before_mins <= now`, even if the event itself had not
+started. With the default 7-minute buffer, any event less than 7 minutes away
+produced no countdown — exactly the worst case for a time-blind user.
+**Fix**: when the buffer has passed but the event hasn't started, return
+`event_start` instead of `None`. The countdown fires to the meeting start,
+giving whatever time remains. `None` is now returned only once the event has
+already started.
+
+---
+
 ### #29 — `_finished_calendar_events` grows unbounded · Open
 The watcher remembers every fired calendar event id in a set so it does not
 re-trigger the same event; an id is only discarded once that event's start time

@@ -35,13 +35,19 @@ from countdown.domain.session import Session, SessionKind
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 _MANIFEST_PATH = Path(__file__).resolve().parent.parent / "apps.manifest"
 
-# Apps the wiggle never targets (system UI + the Python process itself).
+# System processes the wiggle never targets (they can't be meaningfully moved).
 _NEVER_WIGGLE = frozenset(
     {"SystemUIServer", "WindowManager", "Dock", "loginwindow", "Python", "python"}
 )
-# Terminal apps to leave alone — wiggle skips them, watch block-end skips them.
+# Terminal apps — used for block-end extra_skip only (not for shake skip).
 _HOST_TERMINALS = frozenset({"Terminal", "iTerm2", "iTerm", "Warp", "Cursor"})
-_TERM_PROGRAM_TO_APP = {"Apple_Terminal": "Terminal", "iTerm.app": "iTerm2"}
+# Maps TERM_PROGRAM env values to the macOS app display name.
+_TERM_PROGRAM_TO_APP = {
+    "Apple_Terminal": "Terminal",
+    "iTerm.app": "iTerm2",
+    "cursor": "Cursor",
+    "WarpTerminal": "Warp",
+}
 
 
 def build_config(**cli_overrides: object) -> tuple[AppConfig, list[str]]:
@@ -203,7 +209,7 @@ def _make_runner(
         scheduler=MacScheduler(),
         overlay=MacOverlay(config, logger),
         stop_overlay=MacStopOverlay(),
-        shaker=MacShaker(logger, _NEVER_WIGGLE | _host_terminal_names()),
+        shaker=MacShaker(logger, _NEVER_WIGGLE),
         app_control=MacAppControl(),
         block_executor=MacBlockExecutor(logger),
         signals=signals,
@@ -212,6 +218,7 @@ def _make_runner(
 
 
 def _host_terminal_names() -> frozenset[str]:
+    """All known terminal names — used for wiggle skip (don't shake any terminal)."""
     names = set(_HOST_TERMINALS)
     term = os.environ.get("TERM_PROGRAM", "").strip()
     if term:
@@ -223,9 +230,21 @@ def _host_terminal_names() -> frozenset[str]:
 
 
 def _host_terminal_selectors() -> frozenset[AppSelector]:
+    """Selectors for only the *current* launching terminal — block-end extra_skip.
+
+    Only skips the terminal we were actually launched from, so other open
+    terminals (e.g. Terminal.app when launched from Cursor) are still tidied.
+    """
+    detected: set[str] = set()
+    term = os.environ.get("TERM_PROGRAM", "").strip()
+    if term:
+        detected.add(term)
+        mapped = _TERM_PROGRAM_TO_APP.get(term)
+        if mapped:
+            detected.add(mapped)
     return frozenset(
         AppSelector(kind="display_name", value=name)
-        for name in _host_terminal_names()
+        for name in detected
     )
 
 

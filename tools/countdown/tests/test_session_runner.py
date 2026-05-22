@@ -39,11 +39,10 @@ class Harness:
         self.stop_overlay = FakeStopOverlay()
         self.shaker = FakeShaker(available=shaker_available)
         _notes = RunningApp(bundle_id="com.apple.Notes", display_name="Notes")
-        _finder = RunningApp(bundle_id="com.apple.finder", display_name="Finder", is_foreground=True)
         self.app_control = FakeAppControl(
             frontmost=42,
             running=[_notes],
-            foreground=[_notes, _finder],
+            foreground=[_notes],
             apps_by_pid={42: _notes},
         )
         self.block_executor = FakeBlockExecutor(counts={"minimize": 2, "hide": 0, "quit": 0})
@@ -186,5 +185,26 @@ def test_focus_returns_to_prior_app_after_cleanup():
     h.stop_overlay.dismiss = True
     h.runner.pump()  # -> CLEANUP
     h.runner.pump()  # cleanup runs
-    # "Notes" is in the block-end plan, so focus must NOT return to it.
+    # Notes was acted on; Finder is not in the plan → fall back to Finder.
     assert h.app_control.finder_activations == 1
+
+
+def test_finder_not_reactivated_when_in_plan():
+    # If Finder itself was tidied, activate_finder() must not undo that.
+    _notes = RunningApp(bundle_id="com.apple.Notes", display_name="Notes")
+    _finder = RunningApp(bundle_id="com.apple.finder", display_name="Finder", is_foreground=True)
+    h = Harness(block_on_end=True, duration=2.0)
+    h.runner.app_control = FakeAppControl(
+        frontmost=42,
+        running=[_notes],
+        foreground=[_notes, _finder],
+        apps_by_pid={42: _notes},
+    )
+    h.runner.pump()
+    h.clock.advance(5.0)
+    h.runner.pump()  # -> BLOCKING
+    h.stop_overlay.dismiss = True
+    h.runner.pump()  # -> CLEANUP
+    h.runner.pump()  # cleanup runs
+    # Finder is in the plan — must not be re-activated.
+    assert h.runner.app_control.finder_activations == 0

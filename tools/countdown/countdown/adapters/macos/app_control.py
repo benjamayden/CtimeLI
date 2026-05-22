@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 
 import AppKit
+import Quartz
 
 from countdown import ports
 from countdown.domain.apps import RunningApp
@@ -85,40 +86,39 @@ class MacAppControl:
         return apps
 
     def foreground_apps(self) -> list[RunningApp]:
-        """Apps with background only = false, via System Events."""
-        result = subprocess.run(
-            [
-                "osascript",
-                "-e",
-                "tell application \"System Events\"\n"
-                "    set info to {}\n"
-                "    repeat with p in (every process whose background only is false)\n"
-                "        set end of info to (bundle identifier of p) & \"|\" & (name of p)\n"
-                "    end repeat\n"
-                "    return info\n"
-                "end tell",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        """Apps that have windows currently visible on screen (via CGWindowList).
+
+        Uses the window server directly — no AppleScript, no Automation permission.
+        Minimized windows are excluded because they are in the Dock, not on screen.
+        kCGWindowListExcludeDesktopElements drops the Finder desktop/wallpaper
+        layer so Finder only appears when it has an actual folder window open.
+        """
+        window_list = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly
+            | Quartz.kCGWindowListExcludeDesktopElements,
+            Quartz.kCGNullWindowID,
         )
-        if result.returncode != 0 or not result.stdout.strip():
-            return []
+        pids_with_windows: set[int] = set()
+        if window_list:
+            for win in window_list:
+                pid = win.get("kCGWindowOwnerPID")
+                if pid is not None:
+                    pids_with_windows.add(int(pid))
+
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
         apps: list[RunningApp] = []
-        seen: set[str] = set()
-        for item in result.stdout.strip().split(", "):
-            item = item.strip()
-            if "|" in item:
-                bundle_raw, _, name = item.partition("|")
-                bundle_id: str | None = bundle_raw.strip() or None
-            else:
-                bundle_id = None
-                name = item
-            name = name.strip()
-            if not name or name in seen:
+        seen_pids: set[int] = set()
+        for app in workspace.runningApplications():
+            pid = int(app.processIdentifier())
+            if pid not in pids_with_windows or pid in seen_pids:
                 continue
-            seen.add(name)
-            apps.append(RunningApp(bundle_id=bundle_id, display_name=name, is_foreground=True))
+            if app.activationPolicy() != AppKit.NSApplicationActivationPolicyRegular:
+                continue
+            seen_pids.add(pid)
+            bundle_id = app.bundleIdentifier() or None
+            display_name = app.localizedName() or ""
+            if display_name:
+                apps.append(RunningApp(bundle_id=bundle_id, display_name=display_name, is_foreground=True))
         return apps
 
     def set_activation_policy(self, policy: ports.ActivationPolicy) -> None:

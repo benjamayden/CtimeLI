@@ -150,6 +150,8 @@ class SessionRunner:
     def _run_cleanup(self) -> None:
         self.stop_overlay.hide()
         self.overlay.hide()
+        # Pump the run loop so the screen repaints before the AppleScript calls.
+        self.scheduler.pump(0.05)
         plan = plan_block_end(
             self.app_control.running_apps(),
             self.app_control.foreground_apps(),
@@ -172,7 +174,9 @@ class SessionRunner:
                 if bundle_id is None or bundle_id not in acted_bundle_ids:
                     if self.app_control.activate_pid(pid):
                         return
-        self.app_control.activate_finder()
+        # Don't re-activate Finder if we just hid or minimized it.
+        if "com.apple.finder" not in acted_bundle_ids:
+            self.app_control.activate_finder()
 
     def _teardown(self) -> None:
         if self._torn_down:

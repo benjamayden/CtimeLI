@@ -170,8 +170,9 @@ policy). Everything `NSWorkspace`-ish that is *not* block-end execution.
 | `set_activation_policy(policy)` | `accessory` (no Dock icon, used during a session) / `prohibited` (fully hidden, watcher idle) / `regular` (focusable, for the stop modal). |
 
 **Failure** — list methods return `[]` on error, never raise.
-**Adapter** — `macos/app_control.py` (`NSWorkspace`, `NSApp`, and one
-`osascript` call for the foreground-process list).
+**Adapter** — `macos/app_control.py` (`NSWorkspace`, `NSApp`, and
+`Quartz.CGWindowListCopyWindowInfo` for the foreground-window list — no
+Automation permission required).
 
 ---
 

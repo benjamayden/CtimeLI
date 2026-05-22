@@ -239,11 +239,15 @@ start:    datetime   # local time
 When the *block* (zero) should fire for an event.
 ```
 block_at = event_start - minutes(cfg.calendar_block_before_mins)   # default 7
-if block_at <= now: return None       # too late to be useful — skip the event
-return block_at
+if block_at > now:     return block_at    # normal: countdown ends at buffer
+if event_start > now:  return event_start # late: buffer passed, count to event start
+return None                               # event already started — nothing to do
 ```
-So the timer reaches zero `calendar_block_before_mins` minutes *before* the
-meeting, leaving you a buffer to actually arrive.
+Normally the timer reaches zero `calendar_block_before_mins` minutes *before*
+the meeting, leaving a buffer to arrive. If that buffer window has already
+passed but the meeting hasn't started, the countdown fires to the event start
+itself so the user always gets a signal. Returns `None` only once the event
+has already started.
 
 ### Event selection (in the adapter, but the rule is domain policy)
 The nearest **accepted** event whose start is in `(now, now + window]` where
