@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctimeli"
+version = "0.2.0"
+description = "CtimeLI (CLI See Time) — macOS screen-edge countdown timer for time-blind work"
+requires-python = ">=3.11"
+# Runtime PyObjC frameworks are macOS-only and live in requirements.txt so
+# `pip install -e .` works on Linux for running the test suite.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+ctimeli = "ctimeli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ctimeli*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

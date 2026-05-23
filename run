@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Bootstrap the venv on first use, then run the CtimeLI CLI.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+  python3 -m venv "$ROOT/.venv"
+  "$ROOT/.venv/bin/pip" install -q -r "$ROOT/requirements.txt"
+fi
+cd "$ROOT"
+exec "$ROOT/.venv/bin/python" -m ctimeli "$@"

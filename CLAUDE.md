@@ -6,8 +6,8 @@ You are picking up this repo cold. Read this before doing anything.
 
 ```sh
 git log --oneline -10
-ls tools/countdown
-cat tools/countdown/docs/README.md
+ls src/ctimeli docs
+cat docs/README.md
 ```
 
 That is the live state. This file is the durable context.
@@ -19,19 +19,19 @@ That is the live state. This file is the durable context.
 
 ## What this project is
 
-A **macOS screen-edge countdown timer** for time-blind / ADHD work. It draws a
-shrinking stroke around every display, glows the edges as zero nears, progressively
-blurs the desktop in the final stretch, and can hard-block the screen at zero
-and tidy your windows away. It also has a watch mode that auto-starts timers
-from your calendar.
+**CtimeLI** (CLI See Time) — a macOS screen-edge countdown timer for time-blind /
+ADHD work. It draws a shrinking stroke around every display, glows the edges as
+zero nears, progressively blurs the desktop in the final stretch, and can
+hard-block the screen at zero and tidy your windows away. It also has a watch
+mode that auto-starts timers from your calendar.
 
-It lives entirely in `tools/countdown/`.
+The Python package lives in `src/ctimeli/` (src layout).
 
 ## The documentation IS the spec
 
-`tools/countdown/docs/` is a complete, framework-agnostic blueprint. **Trust it
-over the code** — if they disagree, the code is wrong (or the docs need a PR).
-Read [`tools/countdown/docs/README.md`](tools/countdown/docs/README.md) first.
+`docs/` is a complete, framework-agnostic blueprint. **Trust it over the code**
+— if they disagree, the code is wrong (or the docs need a PR).
+Read [`docs/README.md`](docs/README.md) first.
 
 | Doc | For |
 |-----|-----|
@@ -49,15 +49,15 @@ Read [`tools/countdown/docs/README.md`](tools/countdown/docs/README.md) first.
 A **Ports & Adapters** package. Dependencies point inward; the domain is pure.
 
 ```
-tools/countdown/countdown/
+src/ctimeli/
   domain/       PURE logic — math, curves, colours, timespec, session, calendar.
                 No I/O, no platform calls. 100% unit-tested. Port verbatim.
   ports.py      Interfaces — one per external concern (Clock, Overlay, Blur, …).
   app/          Orchestration — SessionRunner, WatchRunner. Depends on domain + ports only.
   adapters/     Concrete ports. macos/ (PyObjC/EventKit/AX/CGEvent), system/ (stdlib).
   composition.py + cli.py   Wiring + argparse. The only place adapters are constructed.
-tools/countdown/tests/      pytest — domain exhaustive, app via fakes.
-tools/countdown/docs/       the blueprint above.
+tests/          pytest — domain exhaustive, app via fakes.
+docs/           the blueprint above.
 ```
 
 **Invariant**: `domain/` and `app/` must never import `AppKit`, `objc`,
@@ -67,21 +67,20 @@ testable on Linux and portable to Rust.
 
 ## Branch
 
-- Repo: `Lenniott/nebulaos`
-- Working branch: `claude/python-refactor-architecture-docs-tXqtr` — develop and
-  push here. Do not open a PR unless asked.
+- Repo: `Lenniott/ctimeli` (rename on GitHub when ready)
+- Working branch: `refactor-structure` — develop and push here. Do not open a PR
+  unless asked.
 
 ## Commands
 
 ```sh
-cd tools/countdown
 .venv/bin/pytest                       # must pass before commit (domain + app)
 ./run 15                               # macOS — 15-minute timer
 ./run watch                            # macOS — watch mode
 
 # Guard gate — must print nothing:
 grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|ApplicationServices|adapters)' \
-     countdown/domain countdown/app
+     src/ctimeli/domain src/ctimeli/app
 ```
 
 ## Status
@@ -96,7 +95,7 @@ grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|Applicat
 ## Keep code and docs in lockstep
 
 Every session should treat **code + docs as one deliverable**. The blueprint in
-`tools/countdown/docs/` is the spec; implementation must match it. When they
+`docs/` is the spec; implementation must match it. When they
 diverge, fix whichever side is wrong — do not leave stale diagrams, port
 contracts, or README copy describing removed behaviour (see the shake→blur
 pivot: docs that still mention wiggle or deleted modules are bugs).
@@ -132,12 +131,11 @@ explicitly — do not silently accumulate debt.
 Quick sanity pass after substantive edits:
 
 ```sh
-cd tools/countdown
 .venv/bin/pytest -q
 grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|ApplicationServices|adapters)' \
-     countdown/domain countdown/app
+     src/ctimeli/domain src/ctimeli/app
 # Optional: grep docs for deleted symbols (shake, shaker, blockend, BlockEndExecutor)
-rg -i 'shake\.py|shaker\.py|WindowShaker|blockend\.py' tools/countdown/docs || true
+rg -i 'shake\.py|shaker\.py|WindowShaker|blockend\.py' docs || true
 ```
 
 ## What to do if the user asks…
