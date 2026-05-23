@@ -32,7 +32,20 @@ class DotEnvSource:
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip().strip('"').strip("'")
+            value = _strip_inline_comment(value.strip().strip('"').strip("'"))
             if key:
                 parsed[key] = value
         return parsed
+
+
+def _strip_inline_comment(value: str) -> str:
+    """Drop trailing ``# …`` from unquoted .env values (``KEY=true  # note``)."""
+    in_single = in_double = False
+    for i, ch in enumerate(value):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double and (i == 0 or value[i - 1].isspace()):
+            return value[:i].rstrip()
+    return value

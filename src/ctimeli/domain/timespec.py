@@ -58,7 +58,7 @@ def parse_target_time(raw: str, now: dt.datetime) -> dt.datetime:
 
 
 def parse_quick_input(raw: str, now: dt.datetime) -> dt.datetime:
-    """Parse CLI / watch-stdin input: bare digits are minutes, else clock time."""
+    """Parse CLI / menu-bar input: bare digits are minutes, else clock time."""
     text = raw.strip()
     if not text:
         raise ValueError("Empty input")

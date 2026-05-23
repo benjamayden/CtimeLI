@@ -64,7 +64,7 @@ port, see [`ports.md`](ports.md) summary table). A `SessionRunner` test:
 This catches orchestration bugs (does zero trigger the stop overlay? does
 `CLEANUP` run the plan exactly once?) with **no Mac and no display**.
 `test_session_runner.py` covers the SessionRunner lifecycle; `test_watch_runner.py`
-covers quick-add input, quit, and calendar auto-start / dedup.
+covers menu bar actions, calendar trump, quit, and calendar auto-start / dedup.
 
 ### Tier 3 — Manual macOS checklist (the unverified surface)
 The macOS adapters cannot run on CI. Verify by hand on a Mac after any change
@@ -75,8 +75,8 @@ to `adapters/macos/`:
 - [ ] Screen blur ramps in the last ~2 min; desktop unreadable at zero.
 - [ ] `./run 1 --block-on-end` — stop overlay covers all displays; ignores
       input for ~0.6 s; click/Return/Escape dismisses; windows tidy per `.env`.
-- [ ] `./run watch` — type `1`, get a timer; type `q`, clean exit; **the
-      terminal still works afterward** (regression guard for #18).
+- [ ] `./run watch` — menu bar icon appears; **Start** `1` gets a timer;
+      **Quit watch mode** clean exit; close terminal — watch keeps running
 - [ ] Calendar event within 10 min auto-starts a green session.
 - [ ] Remote call event (Zoom URL, off work Wi-Fi) opens browser at zero with no stop overlay.
 - [ ] Room-only event shows room on stop overlay when `BLOCK_ON_END=true`.

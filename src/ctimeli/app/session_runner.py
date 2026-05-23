@@ -13,6 +13,7 @@ from ctimeli import ports
 from ctimeli.domain.apps import AppSelector, RunningApp, app_matches_selector
 from ctimeli.domain.calendar import is_work_wifi
 from ctimeli.domain.session import FRAME_INTERVAL, Session, SessionKind, SessionState
+from ctimeli.terminal_ui import ok, warn
 
 _DISMISS_HINT = "Click anywhere to tidy windows · Return · or Ctrl+C"
 _DEFAULT_STOP_LINES = [
@@ -74,10 +75,12 @@ class SessionRunner:
         self.extra_skip = extra_skip
         self._setup_done = False
         self._torn_down = False
+        self._blocking_ui_shown = False
         self._interrupt_seen = False
         self._last_tick: dt.datetime | None = None
         self._restore_focus_pid: int | None = None
         self._call_link_opened = False
+        self._yield_loop = True
 
     def run(self) -> Session:
         """Blocking one-shot loop. Returns the session in its terminal state."""
@@ -85,8 +88,9 @@ class SessionRunner:
             pass
         return self.session
 
-    def pump(self) -> bool:
+    def pump(self, *, yield_loop: bool = True) -> bool:
         """Advance one frame. Returns False once terminal and torn down."""
+        self._yield_loop = yield_loop
         if self._torn_down:
             return False
         if not self._setup_done:
@@ -102,17 +106,21 @@ class SessionRunner:
         state = self.session.state
         if state is SessionState.RUNNING:
             self._run_frame(now, dt_seconds)
-        elif state is SessionState.BLOCKING:
+
+        if self.session.state is SessionState.BLOCKING:
+            self._ensure_blocking_ui()
             if self.stop_overlay.dismissed():
                 self.session.dismiss()
-        elif state is SessionState.CLEANUP:
+
+        if self.session.state is SessionState.CLEANUP:
             self._run_cleanup()
             self.session.cleaned()
 
         if self.session.is_terminal:
             self._teardown()
             return False
-        self.scheduler.pump(FRAME_INTERVAL)
+        if yield_loop:
+            self.scheduler.pump(FRAME_INTERVAL)
         return True
 
     def stop(self) -> None:
@@ -159,12 +167,13 @@ class SessionRunner:
             if self.session.state is SessionState.RUNNING:
                 self.overlay.render(frame)
                 self.blur.set_intensity(frame.blur)
-        if self.session.state is SessionState.BLOCKING:
-            self._enter_blocking()
-        elif self.session.state is SessionState.DONE:
+        if self.session.state is SessionState.DONE:
             self._maybe_open_call_link()
 
-    def _enter_blocking(self) -> None:
+    def _ensure_blocking_ui(self) -> None:
+        if self._blocking_ui_shown:
+            return
+        self._blocking_ui_shown = True
         self._restore_focus_pid = self.app_control.frontmost_pid()
         self.overlay.hide()
         self.blur.set_intensity(1.0)
@@ -185,21 +194,27 @@ class SessionRunner:
             return
         self._call_link_opened = True
         if self.url_opener.open(session.call_url):
-            self.logger.info("Opened call link in browser.")
+            self.logger.info(ok("Call link opened in browser."))
         else:
-            self.logger.warn("Could not open call link.")
+            self.logger.warn(warn("Could not open call link."))
 
     def _run_cleanup(self) -> None:
-        self.stop_overlay.hide()
+        close = self._yield_loop
+        self.stop_overlay.hide(close=close)
         self.blur.hide()
         self.overlay.hide()
-        self.scheduler.pump(0.05)
-        self.app_control.set_activation_policy(ports.ActivationPolicy.PROHIBITED)
+        if self._yield_loop:
+            self.scheduler.pump(0.05)
+        if self._yield_loop:
+            self.app_control.set_activation_policy(ports.ActivationPolicy.PROHIBITED)
+        else:
+            self.app_control.set_activation_policy(ports.ActivationPolicy.ACCESSORY)
         if self._restore_focus_pid is not None:
             self.app_control.activate_pid(self._restore_focus_pid)
-        self.scheduler.pump(0.05)
-        self.workspace_tidy.tidy_focused(skip=self.extra_skip)
-        self.logger.info("Block end: hid other apps, minimized focused window.")
+        if self._yield_loop:
+            self.scheduler.pump(0.05)
+        self.workspace_tidy.tidy_focused(skip=self.extra_skip, pump=self._yield_loop)
+        self.logger.info(ok("Block end — hid other apps, minimized window."))
         self._restore_focus()
 
     def _restore_focus(self) -> None:
@@ -215,7 +230,20 @@ class SessionRunner:
         if self._torn_down:
             return
         self._torn_down = True
-        self.blur.teardown()
-        self.overlay.teardown()
-        self.stop_overlay.hide()
-        self.scheduler.stop()
+        close = self._yield_loop
+        self.stop_overlay.hide(close=close)
+        if self._yield_loop:
+            self.blur.teardown(close=True)
+            self.overlay.teardown(close=True)
+            self.scheduler.stop()
+            return
+        # Watch: defer order-out teardown — window.close() segfaults under AppHelper (#46).
+        blur, overlay = self.blur, self.overlay
+
+        def _destroy_ui() -> None:
+            blur.teardown(close=False)
+            overlay.teardown(close=False)
+
+        from PyObjCTools import AppHelper
+
+        AppHelper.callLater(0, _destroy_ui)

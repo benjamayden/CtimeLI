@@ -129,6 +129,6 @@ noted.
 ./run 15                      # 15 minutes
 ./run 6:00                    # next 6 o'clock
 ./run --for-minutes 25        # explicit minutes
-./run watch                   # watch mode (stdin + calendar)
+./run watch                   # watch mode (menu bar + calendar)
 ./run 25 --block-on-end       # tidy windows at zero
 ```

@@ -82,7 +82,7 @@ implementing the same traits — Liskov holds by construction.
 | `Logger` | stderr writer | `log` + `env_logger`, or Tauri's logging plugin. |
 | `FrameScheduler` | `NSTimer` on the run loop | Tauri's event loop + a `~16 ms` timer, or `requestAnimationFrame` if the overlay is a webview. |
 | `CountdownOverlay` | borderless click-through `NSWindow` | A Tauri window: `transparent: true`, `decorations: false`, `always_on_top: true`, `setIgnoreCursorEvents(true)` for click-through, `skipTaskbar`. Draw the stroke/glow on a `<canvas>` in the webview, **or** an `objc2` `NSWindow` for a non-webview overlay. |
-| `ScreenBlur` | `NSVisualEffectView` per display | Same stack as overlay — frosted-glass layer above stroke, below HUD. Tauri: backdrop-filter on a fullscreen transparent window, or `objc2` `NSVisualEffectView`. |
+| `ScreenBlur` | `NSVisualEffectView` per display | Same stack as overlay — frosted-glass layer below stroke/glow and HUD. Tauri: backdrop-filter on a fullscreen transparent window, or `objc2` `NSVisualEffectView`. |
 | `StopOverlay` | full-screen modal `NSWindow` above screen-saver level | A fullscreen, focused Tauri window; set its level above the screen saver via `objc2` (`NSScreenSaverWindowLevel + 1`) since Tauri has no API for that. |
 | `AppControl` | `NSWorkspace` / `NSApp` | `objc2-app-kit`: `NSWorkspace::sharedWorkspace`, `runningApplications`, activation policy. |
 | `WorkspaceTidy` | `CGEvent` keyboard synthesis | Option+⌘+H (Hide Others), ⌘+M (Minimize) via `CGEvent`; `NSRunningApplication.unhide` for watch-mode skip. |

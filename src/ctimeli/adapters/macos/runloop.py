@@ -14,12 +14,22 @@ def pump_run_loop(seconds: float) -> None:
     """Run the loop briefly without manually dequeuing events.
 
     Manual nextEventMatchingMask dequeuing has crashed PyObjC; runMode:beforeDate:
-    is the safe form. Both event-tracking and default modes are pumped so a
-    drag in progress does not starve normal redraws.
+    is the safe form. Each mode gets its own slice — a single shared deadline lets
+    the first mode consume the whole window and starve NSDefaultRunLoopMode, which
+    is where status-bar clicks arrive (edge-cases #42).
     """
-    deadline = AppKit.NSDate.dateWithTimeIntervalSinceNow_(seconds)
-    for mode in (AppKit.NSEventTrackingRunLoopMode, AppKit.NSDefaultRunLoopMode):
-        AppKit.NSRunLoop.currentRunLoop().runMode_beforeDate_(mode, deadline)
+    if seconds <= 0:
+        return
+    run_loop = AppKit.NSRunLoop.currentRunLoop()
+    modes = (
+        AppKit.NSDefaultRunLoopMode,
+        AppKit.NSEventTrackingRunLoopMode,
+        AppKit.NSModalPanelRunLoopMode,
+    )
+    per_mode = seconds / len(modes)
+    for mode in modes:
+        deadline = AppKit.NSDate.dateWithTimeIntervalSinceNow_(per_mode)
+        run_loop.runMode_beforeDate_(mode, deadline)
 
 
 class MacScheduler:
@@ -31,3 +41,28 @@ class MacScheduler:
     def stop(self) -> None:
         # Nothing retained — the run loop is process-global.
         pass
+
+
+def run_cocoa_watch_loop(watch) -> int:
+    """Drive WatchRunner on the real NSApplication event loop.
+
+    Manual ``pump_run_loop`` slices cannot reliably deliver status-bar menu
+    events; ``AppHelper.runEventLoop`` must own the main thread (edge-cases #42).
+    """
+    from PyObjCTools import AppHelper
+
+    watch._startup()
+    try:
+        watch._announce()
+
+        def tick() -> None:
+            if not watch._tick_once(pump_idle=False, yield_loop=False):
+                AppHelper.stopEventLoop()
+                return
+            AppHelper.callLater(watch.tick_interval(), tick)
+
+        AppHelper.callLater(0, tick)
+        AppHelper.runEventLoop()
+    finally:
+        watch._shutdown()
+    return 0

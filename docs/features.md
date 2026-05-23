@@ -60,8 +60,8 @@ that does not move windows or cause motion sickness.
   window as the edge glow.
 - Intensity ramps `0 → 1` across that window, shaped by `pulse_ramp_power`
   (`1` = linear, `3` = late/cubic) via `blur_intensity()` in [`domain.md`](domain.md).
-- Rendered as a full-screen frosted-glass layer **above** the stroke/glow and
-  **below** the HUD and block modal.
+- Rendered as a full-screen frosted-glass layer **below** the stroke/glow and
+  HUD, so the countdown ring stays visible as the desktop blurs.
 - At zero the screen is fully obscured; if `block_on_end` is on, the blur
   **persists** under the semi-transparent stop overlay and clears on dismiss.
 - Always click-through — never intercepts mouse events.
@@ -136,24 +136,37 @@ focused app is minimized into the Dock; terminal prints
 
 ## 9. Watch mode
 
-`./run watch` starts a long-lived watcher instead of a single timer.
+`./run watch` starts a long-lived background watcher with a **menu bar icon**
+(top-right). The launcher prints a one-line status and returns; you may close the
+terminal. Use the menu bar to start timers, add time, or quit.
 
-- **Quick-add**: type `15` + Enter → a 15-minute timer; type `14:00` → a timer
-  to 2 pm; type `q` / `quit` / `exit` → leave. Starting a new timer replaces
-  any running one.
-- **Calendar auto-start**: if calendar integration is on, the watcher polls for
-  the nearest accepted upcoming event and starts a timer automatically so the
-  block fires `calendar_block_before_mins` (default `7`) *before* the event.
-- **Calendar snap**: while a timer runs, if a sooner event appears the watcher
-  *retargets* the live session to it (and recolours the stroke green).
-- Between sessions the watcher hides itself and waits.
+- **Menu bar Start**: enter minutes in the field → **Start** → a manual timer
+  (replaces any running one).
+- **Menu bar Add**: while a **pure manual** session runs (no pending calendar or
+  hard stop), **Add** extends the deadline by N minutes. Disabled during calendar
+  or hard-stop sessions.
+- **Quit watch mode**: the only way to stop the watcher and calendar/hard-stop
+  polling. There is no in-session toggle to disable calendar integration.
+- **Calendar auto-start**: if calendar integration is on at watch start, the
+  watcher polls for the nearest accepted upcoming event and starts a timer
+  automatically so the block fires `calendar_block_before_mins` (default `7`)
+  *before* the event.
+- **Calendar / hard-stop priority**: whenever an accepted calendar or hard-stop
+  candidate exists, it **always beats** a self-set manual countdown — on Start,
+  on Add, and on every poll. Manual timers only run when no candidate is pending.
+- **Calendar snap**: while a scheduled session runs, if a **sooner** candidate
+  appears the watcher retargets the live session (and recolours the stroke).
+- Between sessions the menu bar icon stays visible; the process uses an
+  accessory activation policy (no Dock icon).
 
-**Acceptance**: typed input and calendar events both produce sessions; a newer,
-sooner calendar event retargets the running session without restarting it.
+**Acceptance**: menu bar Start/Add/Quit work; closing the terminal does not stop
+watch; calendar and hard-stop trump manual Start; Add is rejected when a
+candidate is pending; a sooner calendar event retargets a scheduled session
+without restarting it; Quit removes the menu bar icon and ends the process.
 
 ## 10. Input formats
 
-Accepted everywhere a time is entered (CLI argument, `--at`, watch stdin):
+Accepted for one-shot CLI and menu bar Start (minutes only):
 
 | Input | Meaning |
 |-------|---------|
@@ -182,8 +195,8 @@ permission gap:
 
 | Missing | Behaviour |
 |---------|-----------|
-| Accessibility permission / `ApplicationServices` | Block-end tidy no-ops; one warning; countdown still runs. |
-| `EventKit` / Calendar Full Access | Calendar auto-start disabled; one warning; manual + quick-add still work. |
+| Accessibility permission / `ApplicationServices` | Block-end tidy no-ops; one warning; countdown still runs. Run `./run permissions` — flip **Python** ON in System Settings. |
+| `EventKit` / Calendar Full Access | Calendar auto-start disabled; one warning; manual menu Start still works. Run `./run permissions` — click **Allow** on the macOS dialog. |
 | A display unplugged mid-session | Remaining displays keep rendering. |
 
 ---

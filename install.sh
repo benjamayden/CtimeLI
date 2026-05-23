@@ -31,7 +31,29 @@ echo "→ Installing ctimeli (editable)"
 cp -n "$ROOT/.env.example" "$ROOT/.env"
 echo "→ Env: $ROOT/.env"
 
+_patch_python_calendar_usage() {
+  local plist
+  plist="$("$VENV/bin/python" -c 'from ctimeli.adapters.macos.python_plist import python_framework_info_plist; print(python_framework_info_plist())')"
+  if "$VENV/bin/python" -c 'from ctimeli.adapters.macos.python_plist import calendar_usage_description_present; raise SystemExit(0 if calendar_usage_description_present() else 1)'; then
+    echo "→ Python Calendar usage description: already present"
+    return 0
+  fi
+  echo "→ One-time patch: Python needs NSCalendarsFullAccessUsageDescription"
+  echo "  so macOS can show the Calendar Allow dialog (may ask for your password)."
+  if sudo /usr/libexec/PlistBuddy -c "Add :NSCalendarsFullAccessUsageDescription string 'CtimeLI reads your calendar to auto-start timers before meetings.'" "$plist"; then
+    echo "→ Python Calendar usage description: added"
+  else
+    echo "→ Skipped plist patch — run ./run permissions after fixing manually." >&2
+  fi
+}
+_patch_python_calendar_usage
+
+echo "→ Permissions (optional — ./run permissions to redo later)"
+echo "  Timers work without these; they unlock block-end tidy + calendar auto-start."
+"$VENV/bin/python" -m ctimeli permissions || true
+
 echo "Installed. Try: $ROOT/run watch"
+echo "Watch runs in the menu bar — you can close the terminal after it starts."
 
 _add_zshrc() {
   local tmp

@@ -90,7 +90,7 @@ class FakeOverlay:
     def hide(self) -> None:
         self.hidden = True
 
-    def teardown(self) -> None:
+    def teardown(self, *, close: bool = True) -> None:
         self.torn_down = True
 
 
@@ -108,7 +108,7 @@ class FakeStopOverlay:
     def dismissed(self) -> bool:
         return self.dismiss
 
-    def hide(self) -> None:
+    def hide(self, *, close: bool = True) -> None:
         self.hidden = True
 
 
@@ -130,7 +130,7 @@ class FakeScreenBlur:
     def hide(self) -> None:
         self.hidden = True
 
-    def teardown(self) -> None:
+    def teardown(self, *, close: bool = True) -> None:
         self.torn_down = True
 
 
@@ -170,11 +170,19 @@ class FakeAppControl:
 class FakeWorkspaceTidy:
     """WorkspaceTidy that records tidy_focused calls."""
 
-    def __init__(self) -> None:
-        self.tidy_calls: list[frozenset[AppSelector]] = []
+    def __init__(self, *, access: bool = True) -> None:
+        self.tidy_calls: list[tuple[frozenset[AppSelector], bool]] = []
+        self._access = access
+        self.access_calls = 0
 
-    def tidy_focused(self, *, skip: frozenset[AppSelector]) -> None:
-        self.tidy_calls.append(skip)
+    def ensure_access(self, *, prompt: bool = True) -> bool:
+        self.access_calls += 1
+        return self._access
+
+    def tidy_focused(
+        self, *, skip: frozenset[AppSelector], pump: bool = True
+    ) -> None:
+        self.tidy_calls.append((skip, pump))
 
 
 class FakeCalendar:
@@ -184,12 +192,20 @@ class FakeCalendar:
         self.event = event
         self._access = access
         self.access_calls = 0
+        self.nearest_calls = 0
 
     def ensure_access(self) -> bool:
         self.access_calls += 1
         return self._access
 
+    def access_granted(self) -> bool:
+        return self._access
+
+    def recheck_access(self) -> bool:
+        return self._access
+
     def nearest_event_within(self, minutes: float) -> CalendarEvent | None:
+        self.nearest_calls += 1
         return self.event
 
 
@@ -232,6 +248,9 @@ class FakeSignals:
     def interrupted(self) -> bool:
         return self._interrupted
 
+    def clear(self) -> None:
+        self._interrupted = False
+
     def restore(self) -> None:
         self.restored = True
 
@@ -261,3 +280,57 @@ class FakeWifiSource:
 
     def current_ssid(self) -> str | None:
         return self.ssid
+
+
+class NullInputSource:
+    """InputSource that never EOFs — for detached watch tests."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def poll_lines(self) -> list[str]:
+        return []
+
+    def closed(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class FakeWatchMenuBar:
+    """WatchMenuBar with an injectable action queue."""
+
+    def __init__(self) -> None:
+        self._pending: list[ports.WatchMenuAction] = []
+        self.shown = False
+        self.torn_down = False
+        self.status_label: str | None = None
+        self.idle = True
+        self.extend_enabled = True
+
+    def feed(self, *actions: ports.WatchMenuAction) -> None:
+        self._pending.extend(actions)
+
+    def show(self) -> None:
+        self.shown = True
+
+    def teardown(self) -> None:
+        self.torn_down = True
+
+    def poll_actions(self) -> list[ports.WatchMenuAction]:
+        actions = self._pending
+        self._pending = []
+        return actions
+
+    def set_status(self, *, label: str | None) -> None:
+        self.status_label = label
+
+    def set_idle(self, idle: bool) -> None:
+        self.idle = idle
+
+    def set_extend_enabled(self, enabled: bool) -> None:
+        self.extend_enabled = enabled
+
+    def is_menu_open(self) -> bool:
+        return False

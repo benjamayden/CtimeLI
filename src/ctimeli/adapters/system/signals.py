@@ -23,6 +23,10 @@ class SigintListener:
     def interrupted(self) -> bool:
         return self._interrupted
 
+    def clear(self) -> None:
+        """Reset after a session consumed SIGINT (watch must stay alive)."""
+        self._interrupted = False
+
     def restore(self) -> None:
         if self._previous is not None:
             signal.signal(signal.SIGINT, self._previous)

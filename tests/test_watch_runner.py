@@ -2,6 +2,7 @@
 
 import datetime as dt
 
+from ctimeli import ports
 from ctimeli.app.session_runner import SessionRunner
 from ctimeli.app.watch_runner import WatchRunner
 from ctimeli.domain.calendar import CalendarEvent
@@ -20,14 +21,16 @@ from .fakes import (
     FakeSignals,
     FakeStopOverlay,
     FakeUrlOpener,
+    FakeWatchMenuBar,
     FakeWifiSource,
+    NullInputSource,
     RecordingLogger,
 )
 
 NOW = dt.datetime(2026, 5, 21, 14, 0, 0)
 
 
-def _session_factory(clock, config=None):
+def _session_factory(clock, config=None, signals=None):
     """A factory that builds real SessionRunners wired to fakes."""
 
     def factory(target, *, kind, event_start, event_id, event_title, call_url, room):
@@ -52,7 +55,7 @@ def _session_factory(clock, config=None):
             blur=FakeScreenBlur(),
             app_control=FakeAppControl(),
             workspace_tidy=FakeWorkspaceTidy(),
-            signals=FakeSignals(),
+            signals=signals or FakeSignals(),
             url_opener=FakeUrlOpener(),
             wifi=FakeWifiSource(),
         )
@@ -60,26 +63,29 @@ def _session_factory(clock, config=None):
     return factory
 
 
-def make_watch(*, calendar_event=None, config=None):
+def make_watch(*, calendar_event=None, config=None, menu_bar=None):
     clock = FakeClock(NOW)
     cfg = config or AppConfig()
+    mb = menu_bar or FakeWatchMenuBar()
+    signals = FakeSignals()
     parts = {
         "config": cfg,
         "clock": clock,
         "logger": RecordingLogger(),
         "input_source": FakeInput(),
         "calendar": FakeCalendar(event=calendar_event),
-        "signals": FakeSignals(),
+        "signals": signals,
         "scheduler": FakeScheduler(),
         "app_control": FakeAppControl(),
-        "session_factory": _session_factory(clock, cfg),
+        "menu_bar": mb,
+        "session_factory": _session_factory(clock, cfg, signals),
     }
     return WatchRunner(**parts), parts
 
 
 def test_quick_add_starts_a_session():
     watch, _ = make_watch()
-    watch._handle_line("15")
+    watch._try_start_manual(NOW + dt.timedelta(minutes=15))
     assert watch._current is not None
     assert watch._current.session.kind is SessionKind.MANUAL
 
@@ -119,19 +125,69 @@ def test_finished_calendar_event_is_not_restarted():
 
 
 def test_calendar_retarget_snaps_live_session():
-    # A running session must be retargeted when a sooner calendar event appears.
+    # A running manual session must snap when a sooner calendar event appears.
+    cal = FakeCalendar(event=None)
+    watch, parts = make_watch()
+    watch.calendar = cal
+    watch._try_start_manual(NOW + dt.timedelta(minutes=30))
+    assert watch._current.session.kind is SessionKind.MANUAL
+    cal.event = CalendarEvent(
+        event_id="e1", title="Standup", start=NOW + dt.timedelta(minutes=20)
+    )
+    old_target = watch._current.session.target
+    watch._sync_to_nearest_candidate(from_manual=False)
+    # calendar_block_before_mins default is 7 → block_at = NOW+13min < NOW+30min
+    assert watch._current.session.target < old_target
+    assert watch._current.session.kind is SessionKind.CALENDAR
+    assert any("CAL" in line and "→" in line for line in parts["logger"].info_lines)
+
+
+def test_manual_start_trumped_by_later_calendar():
     event = CalendarEvent(
         event_id="e1", title="Standup", start=NOW + dt.timedelta(minutes=20)
     )
     watch, parts = make_watch(calendar_event=event)
-    watch._handle_line("30")         # start a 30-min manual session
-    watch._current.pump()            # setup → RUNNING (retarget guards non-RUNNING state)
-    old_target = watch._current.session.target
-    watch._retarget_current_to_nearest()
-    # calendar_block_before_mins default is 7 → block_at = NOW+13min < NOW+30min
-    assert watch._current.session.target < old_target
+    watch._try_start_manual(NOW + dt.timedelta(minutes=5))
+    watch._current.pump()
     assert watch._current.session.kind is SessionKind.CALENDAR
-    assert any("Calendar →" in line for line in parts["logger"].info_lines)
+    assert any("Priority" in line for line in parts["logger"].info_lines)
+
+
+def test_extend_rejected_when_calendar_pending():
+    cal = FakeCalendar(event=None)
+    watch, parts = make_watch()
+    watch.calendar = cal
+    watch._try_start_manual(NOW + dt.timedelta(minutes=30))
+    watch._current.pump()
+    cal.event = CalendarEvent(
+        event_id="e1", title="Meet", start=NOW + dt.timedelta(minutes=40)
+    )
+    old_target = watch._current.session.target
+    watch._try_extend_manual(15)
+    assert watch._current.session.target == old_target
+    assert any("extend ignored" in line for line in parts["logger"].info_lines)
+
+
+def test_extend_rejected_on_calendar_session():
+    event = CalendarEvent(
+        event_id="e1", title="Standup", start=NOW + dt.timedelta(minutes=20)
+    )
+    watch, _ = make_watch(calendar_event=event)
+    watch._start_from_nearest()
+    watch._current.pump()
+    old_target = watch._current.session.target
+    watch._try_extend_manual(15)
+    assert watch._current.session.target == old_target
+
+
+def test_extend_pure_manual_session():
+    watch, parts = make_watch()
+    watch._try_start_manual(NOW + dt.timedelta(minutes=10))
+    watch._current.pump()
+    old_target = watch._current.session.target
+    watch._try_extend_manual(5)
+    assert watch._current.session.target > old_target
+    assert any("TIME" in line and "+5" in line for line in parts["logger"].info_lines)
 
 
 def test_completed_calendar_session_adds_to_finished_events():
@@ -156,6 +212,51 @@ def test_completed_calendar_session_adds_to_finished_events():
     assert "evt-fin" in watch._finished_events
 
 
+def test_watch_survives_block_end_dismiss():
+    watch, parts = make_watch(config=AppConfig(block_on_end=True))
+    watch._try_start_manual(NOW + dt.timedelta(seconds=6))
+    runner = watch._current
+    runner.pump()
+    parts["clock"].advance(10.0)
+    runner.pump()                          # -> BLOCKING
+    runner.stop_overlay.dismiss = True
+    while runner.pump():
+        parts["clock"].advance(0.02)
+    watch._pump_current()
+    assert watch._current is None
+    assert watch._tick_once() is True
+
+
+def test_watch_survives_sigint_during_block_end():
+    watch, parts = make_watch(config=AppConfig(block_on_end=True))
+    watch._try_start_manual(NOW + dt.timedelta(minutes=1))
+    runner = watch._current
+    runner.pump()
+    parts["clock"].advance(3600.0)
+    runner.pump()                          # -> BLOCKING
+    parts["signals"].trigger()             # Ctrl+C during block (shared listener)
+    while runner.pump():
+        parts["clock"].advance(0.02)
+    watch._pump_current()
+    assert watch._current is None
+    assert not parts["signals"].interrupted()
+    assert watch._tick_once() is True
+
+
+def test_watch_skips_calendar_queries_when_access_denied():
+    cal = FakeCalendar(access=False)
+    watch, parts = make_watch()
+    watch.calendar = cal
+    watch._announce()
+    assert watch._calendar_available is False
+    nearest_before = cal.nearest_calls
+    watch._try_start_manual(NOW + dt.timedelta(minutes=5))
+    for _ in range(30):
+        watch._tick_once(yield_loop=False)
+    assert cal.nearest_calls == nearest_before
+    assert cal.access_calls == 1
+
+
 def test_interrupt_signal_exits_watch_run_loop():
     watch, parts = make_watch()
     parts["signals"]._interrupted = True   # pre-fire Ctrl+C
@@ -163,23 +264,55 @@ def test_interrupt_signal_exits_watch_run_loop():
     assert exit_code == 0
     assert parts["input_source"].close_calls == 1
     assert parts["signals"].restored is True
+    assert parts["menu_bar"].torn_down is True
 
 
-def test_run_loop_exits_on_quit_input():
+def test_run_loop_exits_on_menu_quit():
     watch, parts = make_watch()
-    parts["input_source"].feed("q")
+    parts["menu_bar"].feed(ports.WatchMenuAction(kind="quit"))
     exit_code = watch.run()
     assert exit_code == 0
     assert parts["signals"].installed is True
     assert parts["signals"].restored is True
-    assert parts["input_source"].close_calls == 1
+    assert parts["menu_bar"].torn_down is True
     assert parts["scheduler"].stopped is True
 
 
-def test_run_loop_exits_on_eof():
+def test_run_loop_survives_input_eof():
     watch, parts = make_watch()
     parts["input_source"].set_closed()
+    parts["menu_bar"].feed(ports.WatchMenuAction(kind="quit"))
     assert watch.run() == 0
+
+
+def test_menu_start_starts_session():
+    watch, parts = make_watch()
+    parts["menu_bar"].feed(ports.WatchMenuAction(kind="start_minutes", minutes=15))
+    watch._poll_menu()
+    assert watch._current is not None
+    assert watch._current.session.kind is SessionKind.MANUAL
+
+
+def test_update_menu_bar_extend_disabled_for_calendar():
+    event = CalendarEvent(
+        event_id="e1", title="Standup", start=NOW + dt.timedelta(minutes=20)
+    )
+    menu_bar = FakeWatchMenuBar()
+    watch, _ = make_watch(calendar_event=event, menu_bar=menu_bar)
+    watch._start_from_nearest()
+    watch._update_menu_bar()
+    assert menu_bar.idle is False
+    assert menu_bar.extend_enabled is False
+
+
+def test_update_menu_bar_does_not_query_calendar_every_frame():
+    watch, parts = make_watch()
+    watch._try_start_manual(NOW + dt.timedelta(minutes=10))
+    watch._refresh_calendar_trump()
+    nearest_before = parts["calendar"].nearest_calls
+    for _ in range(30):
+        watch._update_menu_bar()
+    assert parts["calendar"].nearest_calls == nearest_before
 
 
 def test_hard_stop_auto_starts_when_enabled():
@@ -199,6 +332,7 @@ def test_hard_stop_auto_starts_when_enabled():
         signals=FakeSignals(),
         scheduler=FakeScheduler(),
         app_control=FakeAppControl(),
+        menu_bar=FakeWatchMenuBar(),
         session_factory=_session_factory(clock, config),
     )
     assert watch._start_from_nearest() is True
@@ -251,7 +385,32 @@ def test_hard_stop_wins_when_sooner_than_calendar():
         signals=FakeSignals(),
         scheduler=FakeScheduler(),
         app_control=FakeAppControl(),
+        menu_bar=FakeWatchMenuBar(),
         session_factory=_session_factory(clock, config),
     )
     assert watch._start_from_nearest() is True
     assert watch._current.session.kind is SessionKind.HARD_STOP
+
+
+def test_watch_requests_accessibility_when_block_on_end():
+    tidy = FakeWorkspaceTidy()
+    cfg = AppConfig(block_on_end=True)
+    watch, _ = make_watch(config=cfg)
+    watch._workspace_tidy = tidy
+    watch._announce()
+    assert tidy.access_calls == 1
+
+
+def test_watch_skips_accessibility_when_block_on_end_off():
+    tidy = FakeWorkspaceTidy()
+    cfg = AppConfig(block_on_end=False)
+    watch, _ = make_watch(config=cfg)
+    watch._workspace_tidy = tidy
+    watch._announce()
+    assert tidy.access_calls == 0
+
+
+def test_null_input_never_eof():
+    src = NullInputSource()
+    assert src.closed() is False
+    assert src.poll_lines() == []

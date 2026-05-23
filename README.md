@@ -16,7 +16,7 @@ For people who lose track of time mid-task: 10 minutes before a meeting becomes 
 - Edge glow + progressive blur in the final stretch (default: last 120s)
 - HUD with remaining time + Finish button
 - Block-on-end: full-screen stop overlay, then hide other apps + minimize focused window
-- Watch mode: quick-add timers from stdin; calendar auto-start before events
+- Watch mode: menu bar Start/Add/Quit; calendar auto-start before events; runs in background after launch
 - Calendar sessions: green stroke; manual: blue; retargets if a sooner event appears
 - Remote meetings: parses Zoom/Meet/Teams URLs from calendar; opens link at zero when off work Wi-Fi (`WORK_WIFI_SSIDS`)
 - In-person meetings: stop overlay shows room from event location
@@ -28,10 +28,14 @@ For people who lose track of time mid-task: 10 minutes before a meeting becomes 
 - macOS
 - Python 3.11+ (`python3` on PATH)
 
-**Optional permissions** (countdown works without them)
+**Optional permissions** — timers work without them; `./run permissions` any time
 
-- **Accessibility** — block-end window tidy (Hide Others + minimize)
-- **Full Calendar Access** — watch mode calendar auto-start
+| Permission | Unlocks | How |
+|------------|---------|-----|
+| Accessibility | Block-end window tidy | Alert → System Settings → turn on **Python** |
+| Calendar | Watch auto-start from events | **Allow** on the macOS dialog (after `./install.sh` once) |
+
+Run `./install.sh` to set up; it walks through permissions. Re-run `./run permissions` later if you skipped or denied.
 
 ```sh
 ./install.sh
@@ -50,12 +54,16 @@ Removes `.venv`, `.env`, `apps.manifest`, build caches, and the marked `ctimeli`
 ```sh
 ./run 15               # 15-minute timer
 ./run 6:00pm           # countdown to clock time
-./run watch            # watch mode (quick-add + calendar)
+./run watch            # watch mode (menu bar + calendar; background)
 ```
 
-After install, `ctimeli` in a new terminal runs watch (if you said yes to zshrc). Otherwise `./run watch`.
+After install, `ctimeli` in a new terminal starts watch in the background (if you said yes to zshrc). Otherwise `./run watch`.
 
-Watch stdin: `15` (minutes), `14:00` (clock time), `q` to quit.
+Watch mode: click the menu bar timer icon — **Start timer…** / **Add time…** (when allowed), **Quit watch mode**. Calendar and hard-stop countdowns always take priority over manual timers. You can close the terminal after launch.
+
+If a stuck watch process remains after a crash: `pkill -f "ctimeli watch"`.
+
+Debug foreground (no detach): `CTIMELI_WATCH_FOREGROUND=1 ./run watch`. Log: `~/.cache/ctimeli/watch.log`.
 
 ## Development
 

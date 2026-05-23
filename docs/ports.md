@@ -131,8 +131,8 @@ controller). `lines` is data so future session kinds can supply their own copy
 
 ## `ScreenBlur`
 
-**Purpose** — progressive full-screen frosted glass above the stroke/glow, below
-the HUD and block modal.
+**Purpose** — progressive full-screen frosted glass below the stroke/glow and
+HUD, above normal windows.
 
 | Method | Contract |
 |--------|----------|
@@ -162,7 +162,7 @@ policy). Everything `NSWorkspace`-ish that is *not* block-end execution.
 | `app_for_pid(pid) -> RunningApp \| None` | Structured app identity for a PID; `None` if not found. |
 | `activate_pid(pid) -> bool` | Bring that app to the front; `False` if it is gone. |
 | `running_apps() -> list[RunningApp]` | Every *regular* GUI app (includes windowless ones). Used by the debug `run apps` command. |
-| `set_activation_policy(policy)` | `accessory` (no Dock icon, used during a session) / `prohibited` (fully hidden, watcher idle) / `regular` (focusable, for the stop modal). |
+| `set_activation_policy(policy)` | `accessory` (no Dock icon — watch idle and during countdown) / `prohibited` (fully hidden, session teardown) / `regular` (focusable, for the stop modal). |
 
 **Failure** — list methods return `[]` on error, never raise.
 **Adapter** — `macos/app_control.py` (`NSWorkspace`, `NSApp`).
@@ -175,7 +175,8 @@ policy). Everything `NSWorkspace`-ish that is *not* block-end execution.
 
 | Method | Contract |
 |--------|----------|
-| `tidy_focused(*, skip) -> None` | Post Option+⌘+H (Hide Others), un-hide any `skip` apps, then ⌘+M on the frontmost unless it matches `skip`. |
+| `ensure_access(*, prompt=True) -> bool` | Acquire Accessibility permission. When `prompt` is true, may show the system dialog (`kAXTrustedCheckOptionPrompt`). Idempotent; returns whether the process is trusted. |
+| `tidy_focused(*, skip, pump=True) -> None` | Post Option+⌘+H (Hide Others), un-hide any `skip` apps, then ⌘+M on the frontmost unless it matches `skip`. |
 
 **Pre** — the caller has already activated the pre-block frontmost app.
 **Post** — other apps are hidden; the focused app's front window is minimized
@@ -245,7 +246,26 @@ logged; the app runs without calendar features.
 shared with the parent shell and, if not cleared, can leave the user's terminal
 misbehaving after exit. See [`edge-cases.md`](edge-cases.md) #18 — a real bug in
 the original, now fixed by this port's contract.
-**Adapter** — `system/stdin_source.py` (`fcntl` + `select`).
+**Adapter** — `system/stdin_source.py` (`fcntl` + `select`). Watch mode uses
+`system/null_input.py` in the detached child instead.
+
+---
+
+## `WatchMenuBar`
+
+**Purpose** — menu bar control surface for watch mode (Start, Add, Quit).
+
+| Method | Contract |
+|--------|----------|
+| `show()` | Create the status item. Idempotent. |
+| `teardown()` | Remove the status item. Idempotent. |
+| `poll_actions() -> list[WatchMenuAction]` | User actions since the last call. Never blocks. |
+| `set_status(label=...)` | Remaining-time label on the item, or `None` for icon only. |
+| `set_idle(idle)` | `True` when no session runs — toggles Start vs Add button. |
+| `set_extend_enabled(enabled)` | `False` when calendar/hard-stop trumps manual extend. |
+
+**Adapter** — `macos/watch_menu_bar.py` (`NSStatusBar`, custom menu view).
+**Fake** — `FakeWatchMenuBar`.
 
 ---
 
@@ -299,6 +319,7 @@ into the app or domain.
 | `CalendarSource` | `calendar.EventKitCalendar` | `FakeCalendar` |
 | `UrlOpener` | `url_opener.MacUrlOpener` | `FakeUrlOpener` |
 | `WifiSource` | `wifi.SystemWifi` | `FakeWifiSource` |
-| `InputSource` | `stdin_source.StdinSource` | `FakeInput` |
+| `InputSource` | `stdin_source.StdinSource` / `null_input.NullInputSource` | `FakeInput` / `NullInputSource` |
+| `WatchMenuBar` | `watch_menu_bar.MacWatchMenuBar` | `FakeWatchMenuBar` |
 | `SignalListener` | `signals.SigintListener` | `FakeSignals` |
 | `EnvSource` | `dotenv.DotEnvSource` | plain `dict` |
