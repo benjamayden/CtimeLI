@@ -287,14 +287,15 @@ the now-closed windows before the blocking I/O begins. Do not remove this pump.
 
 ---
 
-### #35 — Finder re-activated immediately after being hidden · Fixed
+### #35 — `activate_finder` fallback was unnecessary · Fixed
 
-`_restore_focus` called `activate_finder()` as its unconditional fallback when
-the previously-frontmost app was in the block-end plan. If Finder itself was
-also in the plan (hidden or minimized), the fallback immediately un-hid it —
-hiding and unhiding Finder in the same cleanup pass.
-**Fix**: `_restore_focus` only calls `activate_finder()` when
-`"com.apple.finder"` is not in `acted_bundle_ids`.
+`_restore_focus` called `activate_finder()` (via `osascript`) as a fallback
+after the block-end tidy. By that point all app windows are already
+hidden/minimized by the keyboard-shortcut tidy, so macOS handles the empty
+desktop state without any explicit focus assignment.
+**Fix**: removed `activate_finder` entirely. `_restore_focus` now only
+re-activates the pre-block app when it is in the skip set (e.g. the host
+terminal); otherwise it does nothing.
 
 ---
 

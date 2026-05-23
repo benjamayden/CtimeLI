@@ -161,7 +161,6 @@ policy). Everything `NSWorkspace`-ish that is *not* block-end execution.
 | `frontmost_pid() -> int \| None` | PID of the frontmost app; `None` if it is our own Python process (so we never "restore focus" to ourselves). |
 | `app_name_for_pid(pid) -> str \| None` | Localised name for a PID. |
 | `activate_pid(pid) -> bool` | Bring that app to the front; `False` if it is gone. |
-| `activate_finder()` | Fallback focus target after a tidy. |
 | `running_app_names() -> list[str]` | Every *regular* GUI app (includes windowless ones). Feeds block-end pass 1. |
 | `foreground_app_names() -> list[str]` | Apps with a visible foreground presence. Feeds block-end pass 2. |
 | `set_activation_policy(policy)` | `accessory` (no Dock icon, used during a session) / `prohibited` (fully hidden, watcher idle) / `regular` (focusable, for the stop modal). |

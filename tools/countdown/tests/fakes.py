@@ -150,7 +150,6 @@ class FakeAppControl:
         self._foreground = foreground or []
         self._apps_by_pid = apps_by_pid or {}
         self.activated_pids: list[int] = []
-        self.finder_activations = 0
         self.policies: list[ports.ActivationPolicy] = []
 
     def frontmost_pid(self) -> int | None:
@@ -162,9 +161,6 @@ class FakeAppControl:
     def activate_pid(self, pid: int) -> bool:
         self.activated_pids.append(pid)
         return pid in self._apps_by_pid
-
-    def activate_finder(self) -> None:
-        self.finder_activations += 1
 
     def running_apps(self) -> list[RunningApp]:
         return list(self._running)

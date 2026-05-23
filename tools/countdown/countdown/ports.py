@@ -130,9 +130,6 @@ class AppControl(Protocol):
     def activate_pid(self, pid: int) -> bool:
         """Bring an app to the front; False if it is gone."""
 
-    def activate_finder(self) -> None:
-        """Fallback focus target after a tidy."""
-
     def running_apps(self) -> list[RunningApp]:
         """Every regular GUI app, including windowless ones."""
 

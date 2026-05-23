@@ -203,16 +203,13 @@ class SessionRunner:
         self._restore_focus()
 
     def _restore_focus(self) -> None:
-        """Return focus to the host terminal, or the pre-block app if it was skipped."""
+        """If the pre-block app is a skip app, re-activate it after the tidy."""
         pid = self._restore_focus_pid
-        if pid is not None:
-            app = self.app_control.app_for_pid(pid)
-            if app is not None and any(
-                app_matches_selector(app, sel) for sel in self.extra_skip
-            ):
-                if self.app_control.activate_pid(pid):
-                    return
-        self.app_control.activate_finder()
+        if pid is None:
+            return
+        app = self.app_control.app_for_pid(pid)
+        if app is not None and any(app_matches_selector(app, sel) for sel in self.extra_skip):
+            self.app_control.activate_pid(pid)
 
     def _teardown(self) -> None:
         if self._torn_down:

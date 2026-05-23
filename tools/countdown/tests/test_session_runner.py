@@ -201,10 +201,9 @@ def test_cleanup_activates_prior_app_before_tidy():
     h.runner.pump()       # -> CLEANUP
     h.runner.pump()       # cleanup runs -> DONE
     assert new_ctrl.activated_pids == [77]
-    assert new_ctrl.finder_activations == 1
 
 
-def test_focus_returns_to_prior_app_after_cleanup():
+def test_cleanup_activates_prior_app_pid_during_tidy():
     h = Harness(block_on_end=True, duration=2.0)
     h.runner.pump()
     h.clock.advance(5.0)
@@ -212,8 +211,8 @@ def test_focus_returns_to_prior_app_after_cleanup():
     h.stop_overlay.dismiss = True
     h.runner.pump()  # -> CLEANUP
     h.runner.pump()  # cleanup runs
-    # Notes was acted on; Finder is not in the plan → fall back to Finder.
-    assert h.app_control.finder_activations == 1
+    # Prior app (pid 42) is activated before the tidy so the tidy operates on it.
+    assert 42 in h.app_control.activated_pids
 
 
 def test_skipped_app_regains_focus_after_cleanup():
@@ -232,8 +231,8 @@ def test_skipped_app_regains_focus_after_cleanup():
     h.stop_overlay.dismiss = True
     h.runner.pump()
     h.runner.pump()
+    # Skip app is activated twice: once before tidy, once in _restore_focus.
     assert h.runner.app_control.activated_pids == [99, 99]
-    assert h.runner.app_control.finder_activations == 0
 
 
 def test_remote_call_opens_url_and_skips_stop_overlay():

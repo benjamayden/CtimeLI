@@ -6,8 +6,6 @@ See docs/ports.md and edge-cases.md "Unverified surface".
 
 from __future__ import annotations
 
-import subprocess
-
 import AppKit
 import Quartz
 
@@ -53,13 +51,6 @@ class MacAppControl:
                     )
                 )
         return False
-
-    def activate_finder(self) -> None:
-        subprocess.run(
-            ["osascript", "-e", 'tell application "Finder" to activate'],
-            capture_output=True,
-            check=False,
-        )
 
     def running_apps(self) -> list[RunningApp]:
         workspace = AppKit.NSWorkspace.sharedWorkspace()
