@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ctimeli.terminal_ui import skip
 from tests.fakes import RecordingLogger
 
 
@@ -31,6 +32,6 @@ def test_warn_denial_logs_once():
 
     logger = RecordingLogger()
     cal = EventKitCalendar(logger=logger)
-    cal._warn_denial("Calendar access was denied.")
-    cal._warn_denial("Calendar access was denied.")
-    assert logger.warn_lines == ["Calendar access was denied."]
+    cal._warn_denial(skip("Calendar access was denied."))
+    cal._warn_denial(skip("Calendar access was denied."))
+    assert logger.warn_lines == [skip("Calendar access was denied.")]

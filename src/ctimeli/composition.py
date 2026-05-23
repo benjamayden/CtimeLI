@@ -37,19 +37,25 @@ from ctimeli.domain.math import format_duration
 from ctimeli.domain.session import Session, SessionKind
 
 
-def request_watch_launch_permissions(config: AppConfig) -> None:
-    """Invoke macOS permission dialogs before detaching watch to the background."""
+def request_watch_launch_permissions(
+    config: AppConfig, *, watch_argv: list[str] | None = None
+) -> bool:
+    """Invoke macOS permission dialogs before detaching watch to the background.
+
+    Returns False when the flow was handed off to Terminal.app (caller must exit).
+    """
     from ctimeli.adapters.macos.appkit_init import ensure_appkit_initialized
     from ctimeli.adapters.macos.permissions import request_watch_launch_permissions as _request
 
     ensure_appkit_initialized()
     logger = StderrLogger()
     scheduler = MacScheduler()
-    _request(
+    return _request(
         config,
         logger=logger,
         workspace_tidy=MacWorkspaceTidy(logger, scheduler),
         calendar=EventKitCalendar(logger),
+        watch_argv=watch_argv or [],
     )
 
 
@@ -63,12 +69,11 @@ def run_permissions_setup(config: AppConfig, *, perm_argv: list[str] | None = No
 
     if should_relaunch_permissions_in_terminal():
         relaunch_permissions_in_terminal(perm_argv or [])
-        print(
-            "Opened permission setup in Terminal.app.\n"
-            "Complete the steps there, then return here.\n"
-            "(Cursor's terminal cannot show macOS permission dialogs.)",
-            flush=True,
-        )
+        print("", flush=True)
+        print(tagged("NEXT", "Opening Terminal.app for setup."), flush=True)
+        print(indent("Dialogs do not work in Cursor's terminal."), flush=True)
+        print(indent("Come back here when done."), flush=True)
+        print("", flush=True)
         return 0
 
     from ctimeli.adapters.macos.appkit_init import ensure_appkit_initialized
@@ -118,10 +123,15 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
     signals = SigintListener()
     signals.install()
     remaining = (target - clock.now()).total_seconds()
+    from ctimeli.terminal_ui import ok, tagged
+
     logger.info(
-        f"CtimeLI → {target:%H:%M:%S} ({format_duration(remaining)} remaining)"
+        tagged(
+            "TIME",
+            f"Ends {target:%H:%M:%S} ({format_duration(remaining)} left)",
+        )
     )
-    logger.info("Ctrl+C to quit.")
+    logger.info(tagged("TIP", "Ctrl+C to quit."))
     app_control = MacAppControl()
     runner = _make_runner(
         config,
@@ -148,12 +158,14 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
     finally:
         signals.restore()
 
+    from ctimeli.terminal_ui import ok, tagged
+
     if session.interrupted:
-        logger.info("Stopped.")
+        logger.info(tagged("STOP", "Timer stopped."))
     elif session.blocked:
-        logger.info("It's time to stop.")
+        logger.info(tagged("STOP", "Time's up."))
     else:
-        logger.info(f"Done — {target:%H:%M} reached.")
+        logger.info(ok(f"Done — {target:%H:%M} reached."))
     return 0
 
 
@@ -187,7 +199,9 @@ def _run_watch_body(config: AppConfig) -> int:
     logger = StderrLogger()
     lock = WatchInstanceLock()
     if not lock.try_acquire():
-        logger.info("Watch already running — exiting.")
+        from ctimeli.terminal_ui import tagged
+
+        logger.info(tagged("WATCH", "Already running — exiting."))
         return 0
     signals = SigintListener()
     input_source = NullInputSource()
@@ -197,7 +211,9 @@ def _run_watch_body(config: AppConfig) -> int:
     workspace_tidy = MacWorkspaceTidy(logger, scheduler)
     menu_bar = MacWatchMenuBar()
     hosts = _host_terminal_selectors()
-    logger.info("CtimeLI watch starting.")
+    from ctimeli.terminal_ui import tagged
+
+    logger.info(tagged("WATCH", "Starting…"))
 
     def factory(target, *, kind, event_start, event_id, event_title, call_url, room):
         return _make_runner(

@@ -57,7 +57,7 @@ Open a second terminal tab to watch for errors:
 
 **Watch for:**
 - [ ] Desktop blurs progressively as time runs out (starts with the edge glow)
-- [ ] Stroke/glow stay visible **under** the blur; HUD Finish stays clickable **above** it
+- [ ] Stroke/glow stay visible **above** the blur; HUD Finish stays clickable
 - [ ] At zero with `block_on_end`: blurred desktop shows through the stop overlay
 - [ ] Click dismiss clears blur and the block screen together
 

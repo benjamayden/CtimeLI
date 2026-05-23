@@ -131,8 +131,8 @@ controller). `lines` is data so future session kinds can supply their own copy
 
 ## `ScreenBlur`
 
-**Purpose** — progressive full-screen frosted glass above the stroke/glow, below
-the HUD and block modal.
+**Purpose** — progressive full-screen frosted glass below the stroke/glow and
+HUD, above normal windows.
 
 | Method | Contract |
 |--------|----------|

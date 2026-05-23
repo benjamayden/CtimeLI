@@ -60,8 +60,8 @@ that does not move windows or cause motion sickness.
   window as the edge glow.
 - Intensity ramps `0 → 1` across that window, shaped by `pulse_ramp_power`
   (`1` = linear, `3` = late/cubic) via `blur_intensity()` in [`domain.md`](domain.md).
-- Rendered as a full-screen frosted-glass layer **above** the stroke/glow and
-  **below** the HUD and block modal.
+- Rendered as a full-screen frosted-glass layer **below** the stroke/glow and
+  HUD, so the countdown ring stays visible as the desktop blurs.
 - At zero the screen is fully obscured; if `block_on_end` is on, the blur
   **persists** under the semi-transparent stop overlay and clears on dismiss.
 - Always click-through — never intercepts mouse events.

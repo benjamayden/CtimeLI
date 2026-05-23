@@ -9,6 +9,7 @@ import AppKit
 import ApplicationServices
 
 from ctimeli import ports
+from ctimeli.terminal_ui import indent, prompt, skip, warn
 from ctimeli.domain.apps import AppSelector, RunningApp, app_matches_selector
 
 from . import keyboard
@@ -51,10 +52,8 @@ class MacWorkspaceTidy:
                 from ctimeli.adapters.macos.permissions import open_accessibility_settings
 
                 open_accessibility_settings()
-                self._logger.info(
-                    "System Settings → Accessibility opened. Turn ON Python, then "
-                    "./run permissions"
-                )
+                self._logger.info(prompt("System Settings → Accessibility opened."))
+                self._logger.info(indent('Turn ON "Python", then ./run permissions'))
         self._warn_accessibility_denied()
         return False
 
@@ -75,11 +74,9 @@ class MacWorkspaceTidy:
 
     def _warn_accessibility_denied(self) -> None:
         if not self._accessibility_warned:
-            self._logger.warn(
-                "Accessibility permission required for workspace tidy "
-                "(System Settings → Privacy & Security → Accessibility)."
-            )
             self._accessibility_warned = True
+            self._logger.warn(skip("Accessibility off — window tidy disabled."))
+            self._logger.warn(indent("System Settings → Privacy → Accessibility"))
 
     def _unhide_skip_apps(self, skip: frozenset[AppSelector]) -> None:
         if not skip:

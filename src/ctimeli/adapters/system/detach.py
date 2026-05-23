@@ -7,9 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ctimeli.terminal_ui import indent, ok, tagged
+
 WATCH_CHILD_ENV = "CTIMELI_WATCH_CHILD"
 WATCH_FOREGROUND_ENV = "CTIMELI_WATCH_FOREGROUND"
-_STATUS = "CtimeLI watch running (menu bar icon). You can close this terminal."
 _LOG_PATH = Path.home() / ".cache" / "ctimeli" / "watch.log"
 
 
@@ -26,13 +27,15 @@ def spawn_detached_watch(watch_argv: list[str]) -> None:
     from ctimeli.adapters.system.watch_lock import watch_is_running
 
     if watch_is_running():
-        print("CtimeLI watch is already running (menu bar).", flush=True)
-        print(f"Log: {_LOG_PATH}", flush=True)
+        print(tagged("WATCH", "Already running (menu bar)."), flush=True)
+        print(indent(f"Log: {_LOG_PATH}"), flush=True)
         return
 
     env = os.environ.copy()
     env[WATCH_CHILD_ENV] = "1"
-    cmd = [sys.executable, "-m", "ctimeli", "watch", *watch_argv]
+    from ctimeli.adapters.system.runtime import runtime_python
+
+    cmd = [runtime_python(), "-m", "ctimeli", "watch", *watch_argv]
 
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _LOG_PATH.open("a", encoding="utf-8") as log:
@@ -53,5 +56,8 @@ def spawn_detached_watch(watch_argv: list[str]) -> None:
     finally:
         os.close(log_fd)
 
-    print(_STATUS, flush=True)
-    print(f"Log: {_LOG_PATH}", flush=True)
+    print("", flush=True)
+    print(ok("Watch running — look for the menu bar icon."), flush=True)
+    print(indent("You can close this terminal."), flush=True)
+    print(indent(f"Log: {_LOG_PATH}"), flush=True)
+    print("", flush=True)

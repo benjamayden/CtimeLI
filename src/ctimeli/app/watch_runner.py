@@ -15,6 +15,7 @@ from ctimeli import ports
 from ctimeli.domain.calendar import CalendarEvent, calendar_block_target, hard_stop_target
 from ctimeli.domain.config import AppConfig
 from ctimeli.domain.math import format_duration, format_duration_compact
+from ctimeli.terminal_ui import indent, ok, skip, tagged
 from ctimeli.domain.session import FRAME_INTERVAL, SessionKind, SessionState
 from ctimeli.domain.timespec import parse_quick_input
 
@@ -137,15 +138,14 @@ class WatchRunner:
         if self.config.block_on_end and self._workspace_tidy is not None:
             self._workspace_tidy.ensure_access()
         if self._calendar_available and not self._start_from_nearest():
-            self.logger.info("Calendar: no accepted event in the next window.")
+            self.logger.info(tagged("CAL", "No upcoming events in window."))
         elif self.config.calendar_enabled and not self._calendar_available:
-            self.logger.info("Calendar access not granted — auto-start disabled.")
+            self.logger.info(skip("Calendar off — auto-start disabled."))
         self._refresh_calendar_trump()
-        self.logger.info(
-            "Watcher ready — click the timer icon in the menu bar to start timers or quit."
-        )
+        self.logger.info(tagged("WATCH", "Ready — click the menu bar icon."))
+        self.logger.info(indent("Start a timer or quit from there."))
         if self.config.block_on_end:
-            self.logger.info("Block on end: dismiss the stop overlay to tidy windows.")
+            self.logger.info(indent("At zero: dismiss the stop screen to tidy windows."))
 
     def _shutdown(self) -> None:
         if self._current is not None:
@@ -255,11 +255,13 @@ class WatchRunner:
             return
         self._refresh_calendar_trump()
         if self._calendar_trumps_manual:
-            self.logger.info("Calendar takes priority — extend ignored.")
+            self.logger.info(skip("Calendar has priority — extend ignored."))
             return
         new_target = session.target + dt.timedelta(minutes=minutes)
         if session.retarget(new_target, self.clock.now()):
-            self.logger.info(f"Extended +{minutes:g}m → {new_target:%H:%M:%S}")
+            self.logger.info(
+                tagged("TIME", f"+{minutes:g}m → ends {new_target:%H:%M:%S}")
+            )
 
     def _evict_stale_finished(self) -> None:
         now = self.clock.now()
@@ -310,7 +312,10 @@ class WatchRunner:
         if kind is SessionKind.HARD_STOP:
             suffix = f" · hard stop {target:%H:%M}"
         self.logger.info(
-            f"CtimeLI → {target:%H:%M:%S} ({format_duration(remaining)} remaining){suffix}"
+            tagged(
+                "TIME",
+                f"Ends {target:%H:%M:%S} ({format_duration(remaining)} left){suffix}",
+            )
         )
 
     def _start_from_nearest(self) -> bool:
@@ -361,20 +366,18 @@ class WatchRunner:
 
     def _log_candidate_sync(self, candidate: _WatchCandidate, *, priority: bool) -> None:
         if candidate.kind is SessionKind.CALENDAR and candidate.event_title:
+            title = candidate.event_title
+            when = candidate.target.strftime("%H:%M")
             if priority:
-                self.logger.info(
-                    f"Calendar takes priority → {candidate.target:%H:%M} "
-                    f"({candidate.event_title})"
-                )
+                self.logger.info(tagged("CAL", f"Priority → {when} ({title})"))
             else:
-                self.logger.info(
-                    f"Calendar → {candidate.target:%H:%M} ({candidate.event_title})"
-                )
+                self.logger.info(tagged("CAL", f"→ {when} ({title})"))
         elif candidate.kind is SessionKind.HARD_STOP:
+            when = candidate.target.strftime("%H:%M")
             if priority:
-                self.logger.info(f"Hard stop takes priority → {candidate.target:%H:%M}")
+                self.logger.info(tagged("CAL", f"Hard stop priority → {when}"))
             else:
-                self.logger.info(f"Hard stop → {candidate.target:%H:%M}")
+                self.logger.info(tagged("CAL", f"Hard stop → {when}"))
 
     def _nearest_candidate(self) -> _WatchCandidate | None:
         now = self.clock.now()

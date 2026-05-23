@@ -19,10 +19,14 @@ from ctimeli.composition import (
     run_permissions_setup,
     run_watch,
 )
+from ctimeli.terminal_ui import indent, tagged
 from ctimeli.domain.timespec import parse_quick_input
 
 
 def main(argv: list[str] | None = None) -> int:
+    from ctimeli.adapters.system.runtime import ensure_runtime_python
+
+    ensure_runtime_python()
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "permissions":
         return _run_permissions(argv[1:])
@@ -40,15 +44,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def _print_main_help() -> None:
     print(
-        """Usage:
-  ctimeli              watch mode (menu bar + calendar; background)
-  ctimeli watch        same as above
-  ctimeli 15           15-minute countdown
-  ctimeli 6:00pm       countdown to clock time
-  ctimeli permissions  macOS setup (Accessibility + Calendar) (Accessibility + Calendar)
+        """
+CtimeLI — screen-edge countdown timer
+
+  ctimeli              watch mode (menu bar)
+  ctimeli watch        same
+  ctimeli 15           15-minute timer
+  ctimeli 6:00pm       timer to clock time
+  ctimeli permissions  macOS setup
   ctimeli apps         list running apps
 
-Config flags: ctimeli watch -h  or  ctimeli 15 -h"""
+Flags:  ctimeli watch -h   or   ctimeli 15 -h
+""".strip()
     )
 
 
@@ -66,7 +73,13 @@ def _run_watch(argv: list[str]) -> int:
     for w in warnings:
         print(w, file=sys.stderr)
     if is_launcher:
-        request_watch_launch_permissions(config)
+        if not request_watch_launch_permissions(config, watch_argv=argv):
+            print("", flush=True)
+            print(tagged("NEXT", "Opening Terminal.app for setup."), flush=True)
+            print(indent("Watch starts there when permissions are done."), flush=True)
+            print(indent("Dialogs do not work in Cursor's terminal."), flush=True)
+            print("", flush=True)
+            return 0
         from ctimeli.adapters.system.detach import spawn_detached_watch
 
         spawn_detached_watch(argv)

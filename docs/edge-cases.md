@@ -456,3 +456,23 @@ though the watch loop correctly returned to idle.
 watch mode defers teardown and uses ``orderOut`` only (no ``close()``) via
 ``AppHelper.callLater(0, …)``. Calendar access is cached after the first denial
 so ``_update_menu_bar`` does not re-hit EventKit every frame.
+
+---
+
+### #47 — Permissions re-prompt every watch launch · Fixed
+
+Two causes:
+
+1. **Split TCC identity** — macOS stores Calendar/Accessibility grants per
+   executable *path*. ``.venv/bin/python3.14`` and ``.venv/bin/python`` are the
+   same binary but separate clients. Granting in Terminal via ``./run`` (``python``)
+   did not apply when Cursor invoked ``python3.14`` directly.
+
+2. **Cursor cannot prompt** — watch launch ran the permission flow inline in
+   Cursor's terminal (dialogs fail per #45), wrote the setup marker anyway, then
+   re-ran the full guide on every launch because Calendar still read as missing.
+
+**Fix**: ``ensure_runtime_python()`` re-execs through ``.venv/bin/python`` at
+CLI entry; detached watch spawns the same path. Watch launch from an embedded
+terminal hands off to Terminal.app (like ``./run permissions``). The setup
+marker is written only when all requested permissions succeed.

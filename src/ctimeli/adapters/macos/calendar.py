@@ -12,6 +12,7 @@ import time
 import AppKit
 
 from ctimeli import ports
+from ctimeli.terminal_ui import indent, skip, warn
 from ctimeli.domain.calendar import CalendarEvent, calendar_block_target, hard_stop_target
 from ctimeli.domain.calendar_fields import parse_call_url, parse_room
 
@@ -67,7 +68,7 @@ class EventKitCalendar:
             if not self._warned:
                 self._warned = True
                 self._logger.warn(
-                    "Calendar disabled: install pyobjc-framework-EventKit"
+                    warn("Calendar disabled — install pyobjc-framework-EventKit")
                 )
             return False
         if self._access_ok:
@@ -98,11 +99,12 @@ class EventKitCalendar:
             self._store = EKEventStore.alloc().init()
         return self._apply_status(self._read_status(), request_if_needed=False)
 
-    def _warn_denial(self, message: str) -> None:
+    def _warn_denial(self, *lines: str) -> None:
         if self._denial_warned:
             return
         self._denial_warned = True
-        self._logger.warn(message)
+        for line in lines:
+            self._logger.warn(line)
 
     def _read_status(self) -> int:
         return int(EKEventStore.authorizationStatusForEntityType_(EKEntityTypeEvent))
@@ -115,7 +117,8 @@ class EventKitCalendar:
             self._access_failed = True
             self._open_calendar_settings_once()
             self._warn_denial(
-                "Calendar: Add Events Only — enable Full Access, or ./run permissions"
+                skip("Calendar is Add Events Only."),
+                indent("Enable Full Access, or run ./run permissions"),
             )
             return False
         if request_if_needed and status == EKAuthorizationStatusNotDetermined:
@@ -126,8 +129,8 @@ class EventKitCalendar:
                     self._access_ok = True
                     return True
                 self._warn_denial(
-                    "Calendar: click Allow on the Python calendars dialog, "
-                    "or run ./run permissions"
+                    skip("Calendar not allowed yet."),
+                    indent("Click Allow on the popup, or run ./run permissions"),
                 )
                 return False
             self._access_ok = True
@@ -136,14 +139,16 @@ class EventKitCalendar:
             self._access_failed = True
             self._open_calendar_settings_once()
             self._warn_denial(
-                "Calendar access denied — System Settings → Calendars, or ./run permissions"
+                skip("Calendar access denied."),
+                indent("System Settings → Calendars, or ./run permissions"),
             )
             return False
         if status != EKAuthorizationStatusNotDetermined:
             self._access_failed = True
             self._open_calendar_settings_once()
         self._warn_denial(
-            "Calendar access not available — run ./run permissions"
+            skip("Calendar not available."),
+            indent("Run ./run permissions"),
         )
         return False
 
@@ -217,7 +222,7 @@ class EventKitCalendar:
         while not done["finished"] and time.monotonic() < deadline:
             pump_run_loop(0.1)
         if done["error"]:
-            self._logger.warn(f"Calendar request error: {done['error']}")
+            self._logger.warn(warn(f"Calendar error: {done['error']}"))
         return done["ok"]
 
     def _open_calendar_settings_once(self) -> None:
@@ -225,11 +230,11 @@ class EventKitCalendar:
             return
         self._settings_opened = True
         from ctimeli.adapters.macos.permissions import open_calendar_settings
+        from ctimeli.terminal_ui import indent, prompt
 
         open_calendar_settings()
-        self._logger.info(
-            "System Settings → Calendars opened. Enable Full Access, then ./run permissions"
-        )
+        self._logger.info(prompt("System Settings → Calendars opened."))
+        self._logger.info(indent("Enable Full Access, then ./run permissions"))
 
 
 def _to_nsdate(value: dt.datetime):

@@ -1,7 +1,7 @@
 """MacScreenBlur — the ScreenBlur port: progressive full-screen frosted glass.
 
-One borderless, click-through window per display, above the stroke/glow overlay
-and below the HUD / block modal. See docs/ports.md.
+One borderless, click-through window per display, below the stroke/glow overlay
+and the HUD / block modal. See docs/ports.md.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import AppKit
 import objc
 from Cocoa import NSColor, NSMakeRect
 
-# Above stroke/glow (+2), below HUD (+4).
-_BLUR_LEVEL = AppKit.NSStatusWindowLevel + 3
+# Below stroke/glow (+3), below HUD (+4).
+_BLUR_LEVEL = AppKit.NSStatusWindowLevel + 2
 
 
 class _BlurView(AppKit.NSView):

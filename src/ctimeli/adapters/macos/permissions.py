@@ -17,6 +17,19 @@ import AppKit
 import ApplicationServices
 
 from ctimeli import ports
+from ctimeli.adapters.system.runtime import runtime_python
+from ctimeli.terminal_ui import (
+    emit_info,
+    emit_warn,
+    indent,
+    ok,
+    prompt,
+    section,
+    skip,
+    step,
+    tagged,
+    warn,
+)
 from ctimeli.domain.config import AppConfig
 
 _ACCESSIBILITY_SETTINGS = (
@@ -47,7 +60,7 @@ def mark_permissions_setup_done() -> None:
 
 def accessibility_client_label() -> str:
     """Human-facing label for the process macOS adds to Accessibility."""
-    return sys.executable
+    return runtime_python()
 
 
 def accessibility_granted() -> bool:
@@ -103,18 +116,33 @@ def should_relaunch_permissions_in_terminal() -> bool:
 def relaunch_permissions_in_terminal(extra_argv: list[str]) -> None:
     """Open Terminal.app — macOS dialogs abort from Cursor's terminal (#45)."""
     import shlex
-    import subprocess
-    import tempfile
 
     args = " ".join(shlex.quote(a) for a in extra_argv)
     cmd_line = f"./run permissions {args}".strip()
+    _write_terminal_launcher("ctimeli-permissions.command", cmd_line)
+
+
+def relaunch_watch_in_terminal(watch_argv: list[str]) -> None:
+    """Open Terminal.app for first-time watch permissions + launch."""
+    import shlex
+
+    args = " ".join(shlex.quote(a) for a in watch_argv)
+    cmd_line = f"./run watch {args}".strip()
+    _write_terminal_launcher("ctimeli-watch.command", cmd_line)
+
+
+def _write_terminal_launcher(filename: str, cmd_line: str) -> None:
+    import shlex
+    import subprocess
+    import tempfile
+
     script = (
         "#!/bin/bash\n"
         f"cd {shlex.quote(os.getcwd())}\n"
         "export CTIMELI_PERMISSIONS_IN_TERMINAL=1\n"
         f"exec {cmd_line}\n"
     )
-    path = Path(tempfile.gettempdir()) / "ctimeli-permissions.command"
+    path = Path(tempfile.gettempdir()) / filename
     path.write_text(script, encoding="utf-8")
     path.chmod(0o755)
     subprocess.run(["open", "-a", "Terminal", str(path)], check=False)
@@ -128,23 +156,25 @@ def ensure_calendar_dialog_ready(logger: ports.Logger) -> bool:
 
     if calendar_usage_description_present():
         return True
-    logger.warn(
-        "Calendar Allow dialog unavailable — run ./install.sh once "
-        "(patches Python's Info.plist; needs sudo)."
+    emit_warn(
+        logger,
+        warn("Calendar dialog blocked."),
+        indent("Run ./install.sh once (needs sudo)."),
     )
     return False
 
 
 def _print_guide_header(logger: ports.Logger) -> None:
-    logger.info("")
-    logger.info("CtimeLI permissions  (optional)")
-    logger.info("")
-    logger.info("  Timers work without these. They unlock:")
-    logger.info("    Accessibility — tidy windows at block-end")
-    logger.info("    Calendar      — auto-start before meetings (watch)")
-    logger.info("")
-    logger.info("  Use Terminal.app if no dialog appears (not Cursor's terminal).")
-    logger.info("")
+    emit_info(
+        logger,
+        *section("permissions (optional)"),
+        tagged("NOTE", "Timers work without these."),
+        indent("Accessibility — tidy windows at block-end"),
+        indent("Calendar — auto-start before meetings"),
+        "",
+        tagged("TIP", "Use Terminal.app if no popup appears."),
+        indent("Cursor's terminal cannot show macOS dialogs."),
+    )
 
 
 def _print_summary(
@@ -155,30 +185,37 @@ def _print_summary(
     need_calendar: bool,
     calendar_ok: bool | None,
 ) -> None:
-    logger.info("")
-    logger.info("── Summary ─────────────────────────")
+    rows: list[str] = []
     if need_accessibility and accessibility_ok is not None:
-        mark = "ok" if accessibility_ok else "missing"
-        logger.info(f"  Accessibility   [{mark}]")
+        mark = "OK" if accessibility_ok else "SKIP"
+        rows.append(f"  Accessibility   {mark}")
     if need_calendar and calendar_ok is not None:
-        mark = "ok" if calendar_ok else "missing"
-        logger.info(f"  Calendar        [{mark}]")
-    logger.info("")
+        mark = "OK" if calendar_ok else "SKIP"
+        rows.append(f"  Calendar        {mark}")
+
     all_ok = (
         (not need_accessibility or accessibility_ok)
         and (not need_calendar or calendar_ok)
     )
+
+    lines = [*section("summary"), *rows, ""]
     if all_ok:
-        logger.info("  All set.")
+        lines.append(ok("All set."))
     else:
-        logger.info("  Countdown still works; re-run: ./run permissions")
-    logger.info("")
+        lines.extend(
+            [
+                tagged("NOTE", "Timers still work without these."),
+                prompt("Run ./run permissions to retry."),
+            ]
+        )
+    lines.append("")
+    emit_info(logger, *lines)
 
 
-def _wait_for_enter(logger: ports.Logger, prompt: str) -> bool:
+def _wait_for_enter(logger: ports.Logger, message: str) -> bool:
     if not sys.stdin.isatty():
         return False
-    logger.info(prompt)
+    emit_info(logger, "", prompt(message))
     try:
         input()
     except EOFError:
@@ -205,56 +242,64 @@ def run_permissions_setup(
     if show_guide and wait_for_user:
         _print_guide_header(logger)
 
-    ok = True
+    ok_result = True
     accessibility_ok: bool | None = None
     calendar_ok: bool | None = None
 
     if need_accessibility:
-        logger.info("── Accessibility ───────────────────")
-        logger.info("  Block-end: hide other apps, minimize focused window.")
-        logger.info("")
-        logger.info("  1. Allow the alert → Open System Settings (no Allow button)")
-        logger.info('  2. Turn ON "Python" in the list')
-        logger.info(f"     {accessibility_client_label()}")
+        emit_info(
+            logger,
+            *section("accessibility"),
+            tagged("FOR", "Block-end window tidy."),
+            "",
+            step(1, "Click Allow in the popup."),
+            step(2, 'Turn ON "Python" in System Settings.'),
+            indent(accessibility_client_label()),
+        )
         activate_for_system_prompt()
         accessibility_ok = workspace_tidy.ensure_access()
         if not accessibility_ok and wait_for_user and _wait_for_enter(
-            logger, "  Press Enter when the toggle is ON."
+            logger, "Press Enter when the toggle is ON."
         ):
             accessibility_ok = workspace_tidy.ensure_access(prompt=False)
         if not accessibility_ok:
-            ok = False
+            ok_result = False
             if wait_for_user:
-                logger.warn("  Accessibility: not enabled — block-end tidy disabled.")
+                emit_warn(logger, skip("Accessibility off — block-end tidy disabled."))
         else:
-            logger.info("  Accessibility: ok")
+            emit_info(logger, "", ok("Accessibility enabled."))
 
     if need_calendar:
-        logger.info("")
-        logger.info("── Calendar ────────────────────────")
-        logger.info("  Watch mode: auto-start before calendar events.")
-        logger.info("")
+        emit_info(
+            logger,
+            *section("calendar"),
+            tagged("FOR", "Watch auto-start before meetings."),
+        )
         if not ensure_calendar_dialog_ready(logger):
             calendar_ok = False
-            ok = False
+            ok_result = False
         else:
-            logger.info('  Look for "Python would like to access your calendars"')
-            logger.info("  → click Allow  (no + button in Calendars settings)")
+            emit_info(
+                logger,
+                "",
+                step(1, 'Click Allow on "Python would like calendars".'),
+                indent("No + button in Settings — use the popup."),
+            )
             activate_for_system_prompt()
             calendar_ok = calendar.ensure_access()
             if not calendar_ok and wait_for_user and _wait_for_enter(
-                logger, "  Press Enter after Allow (or to skip)."
+                logger, "Press Enter after Allow (or to skip)."
             ):
                 recheck = getattr(calendar, "recheck_access", None)
                 calendar_ok = (
                     recheck() if callable(recheck) else calendar.ensure_access()
                 )
             if calendar_ok:
-                logger.info("  Calendar: ok")
+                emit_info(logger, "", ok("Calendar enabled."))
             else:
-                ok = False
+                ok_result = False
                 if wait_for_user:
-                    logger.warn("  Calendar: not granted — watch auto-start disabled.")
+                    emit_warn(logger, skip("Calendar off — auto-start disabled."))
 
     if show_guide and wait_for_user:
         _print_summary(
@@ -266,9 +311,14 @@ def run_permissions_setup(
         )
 
     if wait_for_user:
-        mark_permissions_setup_done()
+        all_ok = (
+            (not need_accessibility or accessibility_ok)
+            and (not need_calendar or calendar_ok)
+        )
+        if all_ok:
+            mark_permissions_setup_done()
 
-    return ok
+    return ok_result
 
 
 def request_watch_launch_permissions(
@@ -277,14 +327,22 @@ def request_watch_launch_permissions(
     logger: ports.Logger,
     workspace_tidy: ports.WorkspaceTidy,
     calendar: ports.CalendarSource,
-) -> None:
-    """Prompt for optional permissions while the watch launcher is still foreground."""
+    watch_argv: list[str] | None = None,
+) -> bool:
+    """Prompt for optional permissions while the watch launcher is still foreground.
+
+    Returns False when the flow was handed off to Terminal.app.
+    """
     need_ax = config.block_on_end
     ax_ok = not need_ax or accessibility_granted()
     cal_ok = not config.calendar_enabled or calendar_granted(calendar)
 
     if not permissions_setup_needed() and ax_ok and cal_ok:
-        return
+        return True
+
+    if should_relaunch_permissions_in_terminal():
+        relaunch_watch_in_terminal(watch_argv or [])
+        return False
 
     wait = (
         permissions_setup_needed()
@@ -299,3 +357,4 @@ def request_watch_launch_permissions(
         wait_for_user=wait,
         show_guide=wait,
     )
+    return True

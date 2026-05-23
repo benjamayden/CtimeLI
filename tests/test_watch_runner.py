@@ -139,7 +139,7 @@ def test_calendar_retarget_snaps_live_session():
     # calendar_block_before_mins default is 7 → block_at = NOW+13min < NOW+30min
     assert watch._current.session.target < old_target
     assert watch._current.session.kind is SessionKind.CALENDAR
-    assert any("Calendar →" in line for line in parts["logger"].info_lines)
+    assert any("CAL" in line and "→" in line for line in parts["logger"].info_lines)
 
 
 def test_manual_start_trumped_by_later_calendar():
@@ -150,7 +150,7 @@ def test_manual_start_trumped_by_later_calendar():
     watch._try_start_manual(NOW + dt.timedelta(minutes=5))
     watch._current.pump()
     assert watch._current.session.kind is SessionKind.CALENDAR
-    assert any("Calendar takes priority" in line for line in parts["logger"].info_lines)
+    assert any("Priority" in line for line in parts["logger"].info_lines)
 
 
 def test_extend_rejected_when_calendar_pending():
@@ -187,7 +187,7 @@ def test_extend_pure_manual_session():
     old_target = watch._current.session.target
     watch._try_extend_manual(5)
     assert watch._current.session.target > old_target
-    assert any("Extended" in line for line in parts["logger"].info_lines)
+    assert any("TIME" in line and "+5" in line for line in parts["logger"].info_lines)
 
 
 def test_completed_calendar_session_adds_to_finished_events():

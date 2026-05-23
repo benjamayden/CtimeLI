@@ -103,7 +103,7 @@ class StopOverlay(Protocol):
 
 @runtime_checkable
 class ScreenBlur(Protocol):
-    """Progressive full-screen blur above the stroke/glow, below the block modal."""
+    """Progressive full-screen blur below the stroke/glow and HUD, below the block modal."""
 
     def show(self) -> None:
         """Create one click-through blur window per display."""

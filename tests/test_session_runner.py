@@ -246,7 +246,7 @@ def test_remote_call_opens_url_and_skips_stop_overlay():
     assert h.session.state is SessionState.DONE
     assert h.url_opener.opened == ["https://zoom.us/j/123"]
     assert h.stop_overlay.shown_lines is None
-    assert any("Opened call link" in line for line in h.logger.info_lines)
+    assert any("Call link" in line for line in h.logger.info_lines)
 
 
 def test_remote_call_on_work_wifi_blocks_without_opening_url():

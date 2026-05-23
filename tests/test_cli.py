@@ -9,7 +9,9 @@ def test_main_empty_argv_runs_watch(monkeypatch):
     monkeypatch.delenv("CTIMELI_WATCH_FOREGROUND", raising=False)
     monkeypatch.delenv("CTIMELI_WATCH_CHILD", raising=False)
     monkeypatch.setattr(
-        cli, "request_watch_launch_permissions", lambda _config: seen.append("perms")
+        cli,
+        "request_watch_launch_permissions",
+        lambda _config, **kwargs: seen.append("perms") or True,
     )
     monkeypatch.setattr(
         "ctimeli.adapters.system.detach.spawn_detached_watch",

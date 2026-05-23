@@ -186,7 +186,7 @@ class CountdownWindow(AppKit.NSWindow):
         )
         if self is None:
             return None
-        self.setLevel_(AppKit.NSStatusWindowLevel + 2)
+        self.setLevel_(AppKit.NSStatusWindowLevel + 3)
         self.setOpaque_(False)
         self.setBackgroundColor_(NSColor.clearColor())
         self.setIgnoresMouseEvents_(True)  # the stroke is click-through

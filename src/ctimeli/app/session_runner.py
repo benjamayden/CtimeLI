@@ -13,6 +13,7 @@ from ctimeli import ports
 from ctimeli.domain.apps import AppSelector, RunningApp, app_matches_selector
 from ctimeli.domain.calendar import is_work_wifi
 from ctimeli.domain.session import FRAME_INTERVAL, Session, SessionKind, SessionState
+from ctimeli.terminal_ui import ok, warn
 
 _DISMISS_HINT = "Click anywhere to tidy windows · Return · or Ctrl+C"
 _DEFAULT_STOP_LINES = [
@@ -193,9 +194,9 @@ class SessionRunner:
             return
         self._call_link_opened = True
         if self.url_opener.open(session.call_url):
-            self.logger.info("Opened call link in browser.")
+            self.logger.info(ok("Call link opened in browser."))
         else:
-            self.logger.warn("Could not open call link.")
+            self.logger.warn(warn("Could not open call link."))
 
     def _run_cleanup(self) -> None:
         close = self._yield_loop
@@ -213,7 +214,7 @@ class SessionRunner:
         if self._yield_loop:
             self.scheduler.pump(0.05)
         self.workspace_tidy.tidy_focused(skip=self.extra_skip, pump=self._yield_loop)
-        self.logger.info("Block end: hid other apps, minimized focused window.")
+        self.logger.info(ok("Block end — hid other apps, minimized window."))
         self._restore_focus()
 
     def _restore_focus(self) -> None:
