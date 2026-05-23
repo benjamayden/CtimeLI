@@ -49,30 +49,21 @@ cd tools/countdown
 
 ---
 
-## 3. Window wiggle
+## 3. Screen blur
 
-**Quick harness** (reads `.env`, matches `./run` timing):
-
-```sh
-./shake --app-timing
-```
-
-Focus a normal window (e.g. TextEdit or Notes) before running — not this
-terminal. `./shake` prints the active `SHAKE_*` values on startup.
-
-**In a real countdown** (full stroke + HUD):
+**In a real countdown:**
 
 ```sh
-./run 0.05    # ~3 second timer — the whole thing is the wiggle window
+./run 2 --block-on-end    # short timer inside the default 120 s glow/blur window
 ```
 
 **Watch for:**
-- [ ] The frontmost window oscillates during the final `SHAKE_WIGGLE_SECONDS`
-- [ ] At zero the window snaps back **exactly** to where it started
-- [ ] Your terminal (the launcher) is never wiggled during `./run`
-- [ ] Changing `SHAKE_SPEED` / `SHAKE_SMOOTH` in `.env` changes `./shake --app-timing`
+- [ ] Desktop blurs progressively as time runs out (starts with the edge glow)
+- [ ] Stroke/glow stay visible **under** the blur; HUD Finish stays clickable **above** it
+- [ ] At zero with `block_on_end`: blurred desktop shows through the stop overlay
+- [ ] Click dismiss clears blur and the block screen together
 
-Automated checklist: `./test_manual.sh shake` (same as `./shake --app-timing`).
+Automated checklist: `./test_manual.sh blur`.
 
 ---
 
@@ -100,8 +91,8 @@ Click the **Finish** button in the HUD within the first few seconds.
 - [ ] Cursor is hidden while the overlay is up; reappears immediately on dismissal
 - [ ] Clicking in the first ~0.6 s does nothing (dismiss lockout)
 - [ ] After the lockout, clicking anywhere / pressing Return / pressing Escape dismisses it
-- [ ] Terminal prints `Block end: minimized N windows.` (or similar)
-- [ ] Windows are minimized (check the Dock)
+- [ ] Terminal prints `Block end: hid other apps, minimized focused window.`
+- [ ] Other apps are hidden; the focused app is minimized into the Dock
 - [ ] Terminal gains focus after cleanup
 
 **Also test Ctrl+C path:**
@@ -117,22 +108,7 @@ Wait for the stop overlay, then press **Ctrl+C** in the terminal tab.
 
 ---
 
-## 6. Block-on-end — hide a specific app
-
-Add to your `.env` (or pass inline):
-
-```sh
-BLOCK_END_HIDE=safari ./run 0.1 --block-on-end
-```
-
-Open Safari first. After dismissing the overlay:
-
-- [ ] Safari is hidden (not minimised — no Dock tile bounce, just gone)
-- [ ] Other foreground apps are minimised (default action)
-
----
-
-## 7. Watch mode — quick add
+## 6. Watch mode — quick add
 
 ```sh
 ./run watch
@@ -148,7 +124,7 @@ At the prompt, type `1` and press Enter.
 
 ---
 
-## 8. Watch mode — calendar auto-start (requires a real event)
+## 7. Watch mode — calendar auto-start (requires a real event)
 
 Create a calendar event starting in the next 5–8 minutes (so the 7-minute
 block window fires immediately).
@@ -164,7 +140,7 @@ block window fires immediately).
 
 ---
 
-## 9. Multi-monitor
+## 8. Multi-monitor
 
 Attach a second display (or use a TV via HDMI/USB-C), then:
 
@@ -179,28 +155,28 @@ Attach a second display (or use a TV via HDMI/USB-C), then:
 
 ---
 
-## 10. Graceful degradation
+## 9. Graceful degradation
 
 **Revoke Accessibility permission:**
 System Settings → Privacy & Security → Accessibility → remove Terminal/Python.
 
 ```sh
-./run 0.05
+./run 0.1 --block-on-end
 ```
 
-- [ ] One warning printed: `Shake disabled: …`
-- [ ] Timer still runs; everything except the wiggle works
+Open a few apps, dismiss the stop overlay.
+
+- [ ] One warning printed about Accessibility / workspace tidy
+- [ ] Timer and overlay still work; tidy no-ops
 
 Restore permission afterwards.
 
 ---
 
-## 11. Block-end app manifest (numbered indices)
+## 10. App manifest (`./run apps`)
 
-Run after any change to `block_executor.py`, `app_control.py`, `cli.py apps`,
-`domain/manifest.py`, or `domain/blockend.py`. Budget **3 minutes**.
-
-### 11a. Generate the app list
+Run after any change to `workspace_tidy.py`, `app_control.py`, or `cli.py apps`.
+Budget **1 minute**.
 
 Open two or three regular GUI apps (e.g. Safari, Notes, TextEdit) **before**
 running:
@@ -211,62 +187,10 @@ running:
 
 **Watch for:**
 - [ ] Numbered table prints: index, display name, bundle ID
-- [ ] Footer shows copy-paste hint: `BLOCK_END_QUIT=1,2,3` (example indices)
 - [ ] `tools/countdown/apps.manifest` created (or updated) next to `.env`
 - [ ] Re-running `./run apps` overwrites the manifest (indices may shift)
 
 **Failure signs:** empty table with apps visibly running; manifest missing; crash.
-
-### 11b. Block-on-end via numeric index
-
-Pick an index from §11a for an app that is **not** your terminal (e.g. Notes = `2`).
-
-```sh
-BLOCK_END_QUIT=2 ./run 0.1 --block-on-end
-```
-
-Focus the target app before the timer ends.
-
-**Watch for:**
-- [ ] At zero: stop overlay → dismiss → terminal prints `Block end: quit 1 app.`
-- [ ] The app matching index `2` in the current manifest is quit/hidden/minimised
-- [ ] Terminal regains focus after cleanup
-
-### 11c. Stale index warning
-
-```sh
-BLOCK_END_QUIT=99 ./run 0.1 --block-on-end
-```
-
-**Watch for:**
-- [ ] One startup warning naming index `99` and suggesting `./run apps`
-- [ ] Timer still runs; no crash
-
-### 11d. Legacy display-name config (backward compat)
-
-Confirm §6 still works — typed names must not regress:
-
-```sh
-BLOCK_END_HIDE=safari ./run 0.1 --block-on-end
-```
-
-Open Safari first.
-
-**Watch for:**
-- [ ] Safari hidden via display-name/alias match (same as before §11)
-- [ ] Other foreground apps minimised (default)
-
-### 11e. Mixed numeric + legacy
-
-With a valid manifest and Safari running:
-
-```sh
-BLOCK_END_HIDE=1 BLOCK_END_QUIT=safari ./run 0.1 --block-on-end
-```
-
-**Watch for:**
-- [ ] Both selectors applied — one app hidden by index, Safari quit by name
-- [ ] Terminal summary reflects both actions
 
 ---
 
@@ -278,6 +202,6 @@ If you only have time for one check:
 ./run 0.1 --block-on-end
 ```
 
-Confirm: stroke appears → shrinks → stop overlay covers both displays → click dismisses → terminal says `Block end: minimized N windows.` → windows minimised → done.
+Confirm: stroke appears → shrinks → stop overlay covers both displays → click dismisses → terminal says `Block end: hid other apps, minimized focused window.` → other apps hidden, focused app minimized → done.
 
 That single run exercises the stroke, the HUD, zero detection, the stop overlay, and the window tidy.

@@ -43,15 +43,14 @@ Architecture). The goals, in priority order:
         ┌───────▼──────────────────────────────────▼───────┐
         │ PORTS    ports.py                                 │
         │   Clock, Logger, FrameScheduler, CountdownOverlay,│
-        │   StopOverlay, WindowShaker, AppControl,          │
-        │   BlockEndExecutor, CalendarSource, InputSource   │
+        │   StopOverlay, AppControl, WorkspaceTidy,          │
+        │   CalendarSource, InputSource                     │
         └───────────────────────┬───────────────────────────┘
                                 │ uses only domain types
                 ┌───────────────▼────────────────┐
                 │ DOMAIN    domain/               │
                 │   math · curves · colors        │
                 │   timespec · session · calendar │
-                │   blockend                      │
                 │   PURE. No I/O. No platform.    │
                 └─────────────────────────────────┘
 ```
@@ -77,7 +76,7 @@ scripts" — a grep gate fails the build if `domain/` or `app/` imports `AppKit`
 
 | Layer | Responsibility | Examples |
 |-------|----------------|----------|
-| **Domain** | Decide *what should be true* given numbers. | `pulse_opacity(remaining, cfg)`, `parse_quick_input("6:00")`, `Session.tick()`, `plan_block_end(apps, cfg)` |
+| **Domain** | Decide *what should be true* given numbers. | `pulse_opacity(remaining, cfg)`, `parse_quick_input("6:00")`, `Session.tick()` |
 | **Ports** | Name *what the app needs from the world*. | `CountdownOverlay.set_pulse(...)`, `CalendarSource.nearest_event()`, `Clock.now()` |
 | **Application** | Orchestrate: pull time from `Clock`, ask Domain what to render, push it to the `Overlay`, react to input. | `SessionRunner.run()`, `WatchRunner.run()` |
 | **Adapters** | Make a Port real on this OS. | `MacOverlay` draws via `NSWindow`; `EventKitCalendar` queries `EKEventStore`; `SystemClock` calls `datetime.now()` |
@@ -296,7 +295,7 @@ tools/countdown/
       timespec.py             # parse_target_time, parse_quick_input
       session.py              # SessionState, SessionKind, Session, RenderFrame
       calendar.py             # CalendarEvent, calendar_block_target
-      blockend.py             # BlockAction, plan_block_end, name resolution
+      manifest.py             # apps.manifest parse/format
     app/
       session_runner.py       # orchestrates one session
       watch_runner.py         # watch-mode loop
@@ -314,7 +313,7 @@ tools/countdown/
         stop_overlay.py       # full-screen block-on-end modal
         shaker.py             # AX frontmost-window shaker
         app_control.py        # NSWorkspace: frontmost, activate, list, policy
-        block_executor.py     # BlockEndExecutor: AppleScript + native quit
+        workspace_tidy.py       # WorkspaceTidy: keyboard Hide Others + Minimize
         calendar.py           # EventKit CalendarSource
   tests/                      # pytest — domain exhaustive, app via fakes
   docs/                       # this folder

@@ -13,11 +13,11 @@ from pathlib import Path
 import AppKit
 
 from countdown.adapters.macos.app_control import MacAppControl
-from countdown.adapters.macos.block_executor import MacBlockExecutor
+from countdown.adapters.macos.workspace_tidy import MacWorkspaceTidy
 from countdown.adapters.macos.calendar import EventKitCalendar
 from countdown.adapters.macos.overlay import MacOverlay
 from countdown.adapters.macos.runloop import MacScheduler
-from countdown.adapters.macos.shaker import MacShaker
+from countdown.adapters.macos.blur import MacScreenBlur
 from countdown.adapters.macos.stop_overlay import MacStopOverlay
 from countdown.adapters.macos.url_opener import MacUrlOpener
 from countdown.adapters.system.clock import SystemClock
@@ -37,11 +37,7 @@ from countdown.domain.session import Session, SessionKind
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 _MANIFEST_PATH = Path(__file__).resolve().parent.parent / "apps.manifest"
 
-# System processes the wiggle never targets (they can't be meaningfully moved).
-_NEVER_WIGGLE = frozenset(
-    {"SystemUIServer", "WindowManager", "Dock", "loginwindow", "Python", "python"}
-)
-# Terminal apps — used for block-end extra_skip only (not for shake skip).
+# Terminal apps — used for block-end extra_skip only.
 _HOST_TERMINALS = frozenset({"Terminal", "iTerm2", "iTerm", "Warp", "Cursor"})
 # Maps TERM_PROGRAM env values to the macOS app display name.
 _TERM_PROGRAM_TO_APP = {
@@ -168,7 +164,7 @@ def run_apps() -> int:
             index_to_bundle[i] = app.bundle_id
 
     indices_str = ",".join(str(i) for i in sorted(index_to_bundle)[:3])
-    print(f"\nCopy into .env:  BLOCK_END_QUIT={indices_str}")
+    print(f"\nExample indices: {indices_str}")
 
     if index_to_bundle:
         manifest_text = format_manifest(index_to_bundle)
@@ -218,16 +214,18 @@ def _make_runner(
         call_url=call_url,
         room=room,
     )
+    app_control = MacAppControl()
+    scheduler = MacScheduler()
     return SessionRunner(
         session,
         clock=clock,
         logger=logger,
-        scheduler=MacScheduler(),
+        scheduler=scheduler,
         overlay=MacOverlay(config, logger),
         stop_overlay=MacStopOverlay(),
-        shaker=MacShaker(logger, _NEVER_WIGGLE),
-        app_control=MacAppControl(),
-        block_executor=MacBlockExecutor(logger),
+        blur=MacScreenBlur(),
+        app_control=app_control,
+        workspace_tidy=MacWorkspaceTidy(logger, scheduler, app_control),
         signals=signals,
         extra_skip=extra_skip,
         url_opener=url_opener,
@@ -236,7 +234,7 @@ def _make_runner(
 
 
 def _host_terminal_names() -> frozenset[str]:
-    """All known terminal names — used for wiggle skip (don't shake any terminal)."""
+    """All known terminal names — kept for reference; block-end uses selectors."""
     names = set(_HOST_TERMINALS)
     term = os.environ.get("TERM_PROGRAM", "").strip()
     if term:

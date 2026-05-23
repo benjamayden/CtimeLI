@@ -1,17 +1,6 @@
-"""Tests for domain.manifest — parse, format, resolve."""
+"""Tests for domain.manifest — parse and format."""
 
-import pytest
-
-from countdown.domain.apps import AppSelector
-from countdown.domain.manifest import format_manifest, parse_manifest, resolve_block_end_csv
-
-
-def _dn(v: str) -> AppSelector:
-    return AppSelector(kind="display_name", value=v)
-
-
-def _bid(v: str) -> AppSelector:
-    return AppSelector(kind="bundle_id", value=v)
+from countdown.domain.manifest import format_manifest, parse_manifest
 
 
 # -- parse_manifest -----------------------------------------------------------
@@ -73,49 +62,3 @@ def test_format_indices_sorted():
 def test_format_includes_comment_header():
     text = format_manifest({1: "com.foo"})
     assert text.splitlines()[0].startswith("#")
-
-
-# -- resolve_block_end_csv ----------------------------------------------------
-
-def test_resolve_numeric_tokens_via_manifest():
-    manifest = {1: "com.google.Chrome", 3: "com.apple.Notes"}
-    selectors, unresolved = resolve_block_end_csv("1,3", manifest)
-    assert selectors == frozenset({_bid("com.google.Chrome"), _bid("com.apple.Notes")})
-    assert unresolved == []
-
-
-def test_resolve_display_name_tokens_no_manifest():
-    selectors, unresolved = resolve_block_end_csv("Chrome, Notes", {})
-    assert selectors == frozenset({_dn("Chrome"), _dn("Notes")})
-    assert unresolved == []
-
-
-def test_resolve_mixed_numeric_and_display():
-    manifest = {1: "com.google.Chrome"}
-    selectors, unresolved = resolve_block_end_csv("1,safari", manifest)
-    assert _bid("com.google.Chrome") in selectors
-    assert _dn("safari") in selectors
-    assert unresolved == []
-
-
-def test_resolve_stale_index_returns_unresolved():
-    selectors, unresolved = resolve_block_end_csv("99", {})
-    assert selectors == frozenset()
-    assert unresolved == ["99"]
-
-
-def test_resolve_empty_csv():
-    selectors, unresolved = resolve_block_end_csv("", {})
-    assert selectors == frozenset()
-    assert unresolved == []
-
-
-def test_resolve_whitespace_only():
-    selectors, unresolved = resolve_block_end_csv("   ", {})
-    assert selectors == frozenset()
-    assert unresolved == []
-
-
-def test_resolve_trailing_comma_ignored():
-    selectors, _ = resolve_block_end_csv("chrome,", {})
-    assert selectors == frozenset({_dn("chrome")})

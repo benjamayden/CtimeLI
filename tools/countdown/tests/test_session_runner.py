@@ -4,21 +4,21 @@ import datetime as dt
 
 from countdown import ports
 from countdown.app.session_runner import SessionRunner
-from countdown.domain.apps import RunningApp
+from countdown.domain.apps import AppSelector, RunningApp
 from countdown.domain.config import AppConfig
 from countdown.domain.session import Session, SessionKind, SessionState
 
 from .fakes import (
     FakeAppControl,
-    FakeBlockExecutor,
     FakeClock,
     FakeOverlay,
     FakeScheduler,
-    FakeShaker,
+    FakeScreenBlur,
     FakeSignals,
     FakeStopOverlay,
     FakeUrlOpener,
     FakeWifiSource,
+    FakeWorkspaceTidy,
     RecordingLogger,
 )
 
@@ -33,7 +33,6 @@ class Harness:
         *,
         block_on_end=False,
         duration=2.0,
-        shaker_available=True,
         kind=SessionKind.MANUAL,
         call_url=None,
         room=None,
@@ -55,7 +54,7 @@ class Harness:
         self.scheduler = FakeScheduler()
         self.overlay = FakeOverlay()
         self.stop_overlay = FakeStopOverlay()
-        self.shaker = FakeShaker(available=shaker_available)
+        self.blur = FakeScreenBlur()
         self.url_opener = FakeUrlOpener()
         self.wifi = FakeWifiSource(wifi_ssid)
         _notes = RunningApp(bundle_id="com.apple.Notes", display_name="Notes")
@@ -65,7 +64,7 @@ class Harness:
             foreground=[_notes],
             apps_by_pid={42: _notes},
         )
-        self.block_executor = FakeBlockExecutor(counts={"minimize": 2, "hide": 0, "quit": 0})
+        self.workspace_tidy = FakeWorkspaceTidy()
         self.signals = FakeSignals()
         self.runner = SessionRunner(
             self.session,
@@ -74,9 +73,9 @@ class Harness:
             scheduler=self.scheduler,
             overlay=self.overlay,
             stop_overlay=self.stop_overlay,
-            shaker=self.shaker,
+            blur=self.blur,
             app_control=self.app_control,
-            block_executor=self.block_executor,
+            workspace_tidy=self.workspace_tidy,
             signals=self.signals,
             url_opener=self.url_opener,
             wifi=self.wifi,
@@ -121,7 +120,7 @@ def test_block_on_end_dismiss_runs_cleanup():
     h.runner.pump()  # -> CLEANUP
     assert h.session.state is SessionState.CLEANUP
     assert h.runner.pump() is False  # CLEANUP runs, -> DONE, torn down
-    assert h.block_executor.executed is not None
+    assert h.workspace_tidy.tidy_calls
     assert h.session.state is SessionState.DONE
     assert any("Block end" in line for line in h.logger.info_lines)
 
@@ -142,17 +141,24 @@ def test_interrupt_ends_the_session():
     assert h.session.state is SessionState.INTERRUPTED
 
 
-def test_shake_is_applied_in_the_wiggle_window():
-    # duration 2 s < the 3 s wiggle window -> the very first frame wiggles.
-    h = Harness(duration=2.0, shaker_available=True)
+def test_blur_is_applied_during_countdown():
+    h = Harness(duration=2.0, block_on_end=False)
     h.runner.pump()
-    assert h.shaker.applied  # at least one offset applied
+    assert h.blur.shown is True
+    assert h.blur.intensities  # blur ramps during the pulse window
 
 
-def test_shake_skipped_when_accessibility_unavailable():
-    h = Harness(duration=2.0, shaker_available=False)
+def test_blur_persists_through_block_and_hides_on_cleanup():
+    h = Harness(block_on_end=True, duration=2.0)
     h.runner.pump()
-    assert h.shaker.applied == []
+    h.clock.advance(5.0)
+    h.runner.pump()  # -> BLOCKING
+    assert h.blur.intensities[-1] == 1.0
+    assert h.blur.hidden is False
+    h.stop_overlay.dismiss = True
+    h.runner.pump()  # -> CLEANUP (dismiss only)
+    h.runner.pump()  # cleanup runs -> DONE
+    assert h.blur.hidden is True
 
 
 def test_interrupt_while_blocking_still_runs_cleanup():
@@ -166,7 +172,7 @@ def test_interrupt_while_blocking_still_runs_cleanup():
     h.runner.pump()       # interrupt() -> CLEANUP (not INTERRUPTED)
     h.runner.pump()       # CLEANUP runs -> DONE
     assert h.session.state is SessionState.DONE
-    assert h.block_executor.executed is not None
+    assert h.workspace_tidy.tidy_calls
     assert h.session.interrupted is True
 
 
@@ -181,8 +187,7 @@ def test_finish_button_with_block_on_end_enters_blocking():
     assert h.overlay.hidden is True
 
 
-def test_focus_returns_to_prior_app_when_not_in_plan():
-    # When the frontmost app is NOT in the block-end plan, focus returns to it.
+def test_cleanup_activates_prior_app_before_tidy():
     h = Harness(block_on_end=True, duration=2.0)
     _safari = RunningApp(bundle_id="com.apple.Safari", display_name="Safari")
     new_ctrl = FakeAppControl(
@@ -196,7 +201,7 @@ def test_focus_returns_to_prior_app_when_not_in_plan():
     h.runner.pump()       # -> CLEANUP
     h.runner.pump()       # cleanup runs -> DONE
     assert new_ctrl.activated_pids == [77]
-    assert new_ctrl.finder_activations == 0
+    assert new_ctrl.finder_activations == 1
 
 
 def test_focus_returns_to_prior_app_after_cleanup():
@@ -211,24 +216,23 @@ def test_focus_returns_to_prior_app_after_cleanup():
     assert h.app_control.finder_activations == 1
 
 
-def test_finder_not_reactivated_when_in_plan():
-    # If Finder itself was tidied, activate_finder() must not undo that.
-    _notes = RunningApp(bundle_id="com.apple.Notes", display_name="Notes")
-    _finder = RunningApp(bundle_id="com.apple.finder", display_name="Finder", is_foreground=True)
+def test_skipped_app_regains_focus_after_cleanup():
+    _terminal = RunningApp(bundle_id="com.apple.Terminal", display_name="Terminal")
     h = Harness(block_on_end=True, duration=2.0)
+    h.runner.extra_skip = frozenset({AppSelector(kind="display_name", value="Terminal")})
     h.runner.app_control = FakeAppControl(
-        frontmost=42,
-        running=[_notes],
-        foreground=[_notes, _finder],
-        apps_by_pid={42: _notes},
+        frontmost=99,
+        running=[_terminal],
+        foreground=[_terminal],
+        apps_by_pid={99: _terminal},
     )
     h.runner.pump()
     h.clock.advance(5.0)
-    h.runner.pump()  # -> BLOCKING
+    h.runner.pump()
     h.stop_overlay.dismiss = True
-    h.runner.pump()  # -> CLEANUP
-    h.runner.pump()  # cleanup runs
-    # Finder is in the plan — must not be re-activated.
+    h.runner.pump()
+    h.runner.pump()
+    assert h.runner.app_control.activated_pids == [99, 99]
     assert h.runner.app_control.finder_activations == 0
 
 
@@ -294,9 +298,9 @@ def test_hard_stop_shows_hard_stop_overlay_lines():
         scheduler=h.scheduler,
         overlay=h.overlay,
         stop_overlay=h.stop_overlay,
-        shaker=h.shaker,
+        blur=h.blur,
         app_control=h.app_control,
-        block_executor=h.block_executor,
+        workspace_tidy=h.workspace_tidy,
         signals=h.signals,
         url_opener=h.url_opener,
         wifi=h.wifi,

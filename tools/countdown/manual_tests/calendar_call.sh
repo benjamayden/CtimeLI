@@ -6,9 +6,7 @@ cd "$(dirname "$0")/.."
 echo "CALENDAR CALL TEST"
 echo "  1. Ensure you are NOT on a work Wi-Fi SSID listed in WORK_WIFI_SSIDS."
 echo "  2. Create a calendar event ~3 min from now with a Zoom/Meet URL in the URL field."
-echo "  3. Click the app you want wiggled (not this terminal) — shake only runs in"
-echo "     the final SHAKE_WIGGLE_SECONDS from .env (default 3 s)."
-echo "  4. Press Enter to start watch mode with BLOCK_ON_END=true."
+echo "  3. Press Enter to start watch mode with BLOCK_ON_END=true."
 printf "\n  Press Enter… "; read -r
 
 BLOCK_ON_END=true ./run watch || true

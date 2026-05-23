@@ -10,13 +10,13 @@ from countdown.domain.session import Session, SessionKind
 
 from .fakes import (
     FakeAppControl,
-    FakeBlockExecutor,
+    FakeWorkspaceTidy,
     FakeCalendar,
     FakeClock,
     FakeInput,
     FakeOverlay,
     FakeScheduler,
-    FakeShaker,
+    FakeScreenBlur,
     FakeSignals,
     FakeStopOverlay,
     FakeUrlOpener,
@@ -49,9 +49,9 @@ def _session_factory(clock, config=None):
             scheduler=FakeScheduler(),
             overlay=FakeOverlay(),
             stop_overlay=FakeStopOverlay(),
-            shaker=FakeShaker(),
+            blur=FakeScreenBlur(),
             app_control=FakeAppControl(),
-            block_executor=FakeBlockExecutor(),
+            workspace_tidy=FakeWorkspaceTidy(),
             signals=FakeSignals(),
             url_opener=FakeUrlOpener(),
             wifi=FakeWifiSource(),
@@ -112,7 +112,7 @@ def test_finished_calendar_event_is_not_restarted():
         event_id="evt-1", title="Standup", start=NOW + dt.timedelta(minutes=20)
     )
     watch, _ = make_watch(calendar_event=event)
-    watch._finished_events.add("evt-1")
+    watch._finished_events["evt-1"] = NOW + dt.timedelta(minutes=20)
     # Event start is still in the future -> dedup suppresses it.
     assert watch._pending_event() is None
     assert watch._start_from_nearest() is False
@@ -203,6 +203,31 @@ def test_hard_stop_auto_starts_when_enabled():
     )
     assert watch._start_from_nearest() is True
     assert watch._current.session.kind is SessionKind.HARD_STOP
+
+
+def test_evict_stale_finished_clears_past_entries():
+    watch, parts = make_watch()
+    # Seed finished_events with one past and one future entry.
+    past_start = NOW - dt.timedelta(hours=2)
+    future_start = NOW + dt.timedelta(minutes=30)
+    watch._finished_events["old-evt"] = past_start
+    watch._finished_events["future-evt"] = future_start
+    watch._evict_stale_finished()
+    assert "old-evt" not in watch._finished_events
+    assert "future-evt" in watch._finished_events
+
+
+def test_evict_called_during_calendar_poll():
+    # After the poll interval, stale entries are swept even when the calendar
+    # returns a different nearest event (the path that previously left them stuck).
+    config = AppConfig(calendar_poll_seconds=15.0)
+    watch, parts = make_watch(config=config)
+    past_start = NOW - dt.timedelta(hours=1)
+    watch._finished_events["stale-evt"] = past_start
+    # Advance past the poll interval so _poll_calendar runs.
+    parts["clock"].advance(20.0)
+    watch._poll_calendar()
+    assert "stale-evt" not in watch._finished_events
 
 
 def test_hard_stop_wins_when_sooner_than_calendar():

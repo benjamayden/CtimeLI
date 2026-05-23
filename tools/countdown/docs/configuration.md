@@ -50,109 +50,24 @@ an error, not a silent drop ([`edge-cases.md`](edge-cases.md) #6).
 **overrides** the preset if both are set. The corresponding CLI flags
 (`--pulse-ramp`, `--pulse-ramp-power`) follow the same rule.
 
-## Window wiggle
+## Screen blur
 
-| Field | Env key | Default | Meaning |
-|-------|---------|---------|---------|
-| `shake_wiggle_seconds` | `SHAKE_WIGGLE_SECONDS` | `3.0` | The final N seconds during which the frontmost window wiggles. |
-| `shake_max_x` | `SHAKE_MAX_X` | `28.0` | Max horizontal offset, px. |
-| `shake_max_y` | `SHAKE_MAX_Y` | `28.0` | Max vertical offset, px. |
-| `shake_speed` | `SHAKE_SPEED` | `10.0` | Base oscillation speed. |
-| `shake_speed_x` | `SHAKE_SPEED_X` | `10.0` | X-axis frequency multiplier. |
-| `shake_speed_y` | `SHAKE_SPEED_Y` | `10.0` | Y-axis frequency multiplier. |
-| `shake_smooth` | `SHAKE_SMOOTH` | `14.0` | Motion smoothing rate (`lerp` rate; higher = snappier). |
-
-**Single source of truth.** All seven fields above live on `AppConfig` and are
-read by `./run`, `./run watch`, and `./shake`. Edit `.env` once; every entry
-point picks up the same motion parameters. The wiggle *timing* in a real session
-comes from `domain/curves.py::shake_intensity` (last N seconds only); the wiggle
-*feel* (amplitude, speed, smoothing) comes from the `SHAKE_*` fields via
-`domain/shake.py::ShakeMotion`.
-
-### Tuning with `./shake`
-
-The harness (`shake_tune.py`, invoked as `./shake`) loads `.env` through the
-same `build_config()` path as `./run`. CLI flags override `.env` only when
-explicitly passed (`None` default = keep `.env` value).
-
-```sh
-./shake                     # duration = SHAKE_WIGGLE_SECONDS; motion from .env
-./shake --app-timing        # same intensity ramp as ./run (recommended preview)
-./shake --seconds 10        # longer run; motion still from .env
-./shake --speed 12          # one-off override; .env unchanged
-```
-
-On startup `./shake` prints the active values, e.g.
-`max=(28,28) speed=10 smooth=14 (from .env)`.
-
-| `./shake` flag | Meaning |
-|----------------|---------|
-| `--seconds SEC` | How long to run (default: `SHAKE_WIGGLE_SECONDS`). |
-| `--app-timing` | Use `shake_intensity()` like the app — ramp only in the final wiggle window. Without this flag, intensity ramps 0→1 over the full run (legacy tuning mode). |
-| `--intensity 0-1` | Fixed intensity for the whole run (overrides ramp). |
-| `--max-x`, `--max-y`, `--speed`, `--speed-x`, `--speed-y`, `--smooth` | Override the matching `SHAKE_*` field for one run. |
-
-**Harness vs app.** `./shake` does not draw the stroke overlay and does not skip
-the host terminal — focus the window you want nudged before running. In
-`./run` / `./run watch`, Terminal / Python / Cursor are never wiggled when
-frontmost; the app logs once if shake is skipped for that reason.
-
-### Removed legacy keys
-
-The original `AppConfig` carried five fields that were loaded but **never
-used** — the timing model moved to the pulse/wiggle curves above and these were
-left behind as dead config:
-
-`SHAKE_BEFORE_MINS`, `SHAKE_START_FRACTION`, `SHAKE_NUDGE_SECONDS`,
-`SHAKE_NUDGE_LEVEL`, `SHAKE_STOP_BEFORE_MINS`.
-
-They are **removed**. If present in a `.env` they are ignored (unknown env keys
-are harmless). See [`edge-cases.md`](edge-cases.md) #7.
+Blur timing and ramp shape share the **edge glow** settings above — no separate
+env keys. `domain/curves.py::blur_intensity()` mirrors `pulse_spread()` over
+`pulse_before_secs`, reaching full strength at zero. Use `PULSE_RAMP=late` for
+a blur that intensifies mostly toward the end.
 
 ## Block-on-end
 
 | Field | Env key | Default | Meaning |
 |-------|---------|---------|---------|
-| `block_on_end` | `BLOCK_ON_END` | `false` | At zero, show the stop overlay then tidy windows. |
-| `block_end_default` | `BLOCK_END_DEFAULT` | `minimize` | Action for foreground apps not on any explicit list. One of `minimize` / `hide` / `quit` / `skip`. |
-| `block_end_minimize` | `BLOCK_END_MINIMIZE` | *(empty)* | Comma-separated app names to minimize. |
-| `block_end_hide` | `BLOCK_END_HIDE` | *(empty)* | Comma-separated app names to hide. |
-| `block_end_quit` | `BLOCK_END_QUIT` | *(empty)* | Comma-separated app names to quit. |
-| `block_end_skip` | `BLOCK_END_SKIP` | *(empty)* | Comma-separated app names to leave alone. |
+| `block_on_end` | `BLOCK_ON_END` | `false` | At zero, show the stop overlay then tidy windows (Hide Others + Minimize). |
 
-`BLOCK_END_DEFAULT` is validated against the four legal actions; an unrecognised
-value falls back to `minimize`.
+The tidy behaviour is fixed — see [`features.md`](features.md) §8. It requires
+Accessibility permission for synthetic keyboard events.
 
-The full assignment precedence is in [`features.md`](features.md) §8 and the
-pure planning algorithm in [`domain.md`](domain.md) §6.
-
-### App-name aliases
-
-Block-end name matching is alias-aware and case-insensitive, so a `.env` can use
-the casual name:
-
-| You write | Resolves to |
-|-----------|-------------|
-| `chrome`, `google chrome` | `Google Chrome`, `Chrome` |
-| `settings` | `System Settings`, `Settings` |
-| `system preferences` | `System Settings` |
-| `iterm` | `iTerm2`, `iTerm` |
-| `vscode` | `Code` |
-| `terminal`, `apple_terminal` | `Terminal`, `Apple_Terminal` |
-| `cursor` | `Cursor` |
-
-### Never-touched apps
-
-Always skipped by block-end, regardless of config (the `SYSTEM_SKIP` set):
-`SystemUIServer`, `WindowManager`, `Dock`, `loginwindow`, `Python`, `python`.
-In **watch mode** the host terminal is added to the skip set too, so the watcher
-never hides the terminal you are still using.
-
-### Never-wiggled apps
-
-Independently of block-end, the wiggle never targets: `Terminal`, `iTerm2`,
-`iTerm`, `Warp`, `Cursor`, `Python`/`python`, `SystemUIServer`, `WindowManager`,
-`Dock`, `loginwindow`. The current `$TERM_PROGRAM` is added dynamically.
+In **watch mode** the host terminal is un-hidden after Hide Others and is never
+minimized if it was the focused app.
 
 ## Calendar
 
@@ -196,9 +111,7 @@ noted.
 --stroke-width            --pulse-before-secs SEC      --pulse-opacity-ramp-secs SEC
 --pulse-max-opacity 0-1   --pulse-depth-min PX         --pulse-depth-max PX
 --pulse-ramp {linear,late}                             --pulse-ramp-power N
---pulse-visual-power N    --shake-wiggle-seconds SEC
---shake-max-x  --shake-max-y  --shake-speed  --shake-speed-x  --shake-speed-y  --shake-smooth
---red-zone-fraction 0-1
+--pulse-visual-power N    --red-zone-fraction 0-1
 --block-on-end / --no-block-on-end       (boolean toggle)
 ```
 
@@ -218,6 +131,4 @@ noted.
 ./run --for-minutes 25        # explicit minutes
 ./run watch                   # watch mode (stdin + calendar)
 ./run 25 --block-on-end       # tidy windows at zero
-./shake                       # wiggle harness — reads .env (see Window wiggle above)
-./shake --app-timing          # preview wiggle timing exactly like ./run
 ```

@@ -79,8 +79,9 @@ class WatchRunner:
         self._current: SessionRunner | None = None
         self._quit = False
         self._last_cal_poll = 0.0
-        # Calendar event ids already fired — prevents re-trigger (edge-cases #29).
-        self._finished_events: set[str] = set()
+        # Maps fired event_id → event_start so stale entries can be evicted once
+        # the event's start time passes (edge-cases #29).
+        self._finished_events: dict[str, dt.datetime] = {}
 
     def run(self) -> int:
         """Run the watch loop until the user quits. Returns an exit code."""
@@ -138,7 +139,7 @@ class WatchRunner:
             and session.blocked
             and not session.interrupted
         ):
-            self._finished_events.add(session.event_id)
+            self._finished_events[session.event_id] = session.event_start or session.target
         self._current = None
         self._go_idle()
 
@@ -168,6 +169,12 @@ class WatchRunner:
         # A manual timer still snaps to a sooner watch candidate if there is one.
         self._retarget_current_to_nearest()
 
+    def _evict_stale_finished(self) -> None:
+        now = self.clock.now()
+        stale = [eid for eid, start in self._finished_events.items() if now >= start]
+        for eid in stale:
+            del self._finished_events[eid]
+
     def _poll_calendar(self) -> None:
         if not self.config.calendar_enabled and not self.config.hard_stop_enabled:
             return
@@ -175,6 +182,7 @@ class WatchRunner:
         if elapsed < self.config.calendar_poll_seconds:
             return
         self._last_cal_poll = self.clock.monotonic()
+        self._evict_stale_finished()
         if self._current is None:
             self._start_from_nearest()
         else:
@@ -298,7 +306,7 @@ class WatchRunner:
             return None
         if event.event_id in self._finished_events:
             if self.clock.now() >= event.start:
-                self._finished_events.discard(event.event_id)
+                del self._finished_events[event.event_id]
             else:
                 return None
         return event

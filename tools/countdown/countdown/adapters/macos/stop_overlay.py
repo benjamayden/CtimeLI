@@ -122,7 +122,7 @@ class StopBlockView(AppKit.NSView):
             self._controller.dismiss()
 
     def drawRect_(self, _rect) -> None:
-        NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.82).set()
+        NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.50).set()
         AppKit.NSBezierPath.fillRect_(self.bounds())
 
         width = self.bounds().size.width

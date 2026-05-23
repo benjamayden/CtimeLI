@@ -1,7 +1,7 @@
 """App identity types and name-matching helpers. See docs/domain.md.
 
 RunningApp and AppSelector are the domain's view of a running process.
-The alias table and matching logic live here so blockend.py never duplicates them.
+The alias table and matching logic live here for watch-mode skip selectors.
 """
 
 from __future__ import annotations

@@ -93,52 +93,17 @@ return t ** cfg.pulse_ramp_power                  # 1 = linear, 3 = late/cubic
 `pulse_ramp_power` lets the deepening feel linear or back-loaded. The renderer
 maps spread `0..1` onto pixel depth `pulse_depth_min .. pulse_depth_max`.
 
-### `shake_intensity(remaining, cfg) -> float`  →  range `0 .. 1`
-Wiggle strength for the frontmost window. Only the final seconds.
+### `blur_intensity(remaining, cfg) -> float`  →  range `0 .. 1`
+Full-screen blur strength. Shares the glow window and spread ramp.
 ```
-wiggle = max(0.5, cfg.shake_wiggle_seconds)       # default 3
-if remaining <= 0 or remaining > wiggle: return 0
-return smoothstep(1 - remaining / wiggle)
+if remaining <= 0: return 1
+return pulse_spread(remaining, cfg)
 ```
-At `remaining = wiggle` → 0; at `remaining → 0` → 1.
-
-> **Smell fixed.** The original signature was
-> `shake_intensity(remaining, total_sec, cfg)` and the body did `_ = total_sec`
-> — the parameter was dead. It is removed. See [`edge-cases.md`](edge-cases.md) #9.
+At the glow window edge → 0; at zero → 1. Shape follows `pulse_ramp_power`.
 
 ### Deleted: `pulse_intensity`
 The original kept `pulse_intensity` as a "deprecated alias" that just called
 `pulse_spread`. Dead code — removed. Callers use `pulse_spread`.
-
----
-
-## 2b. Wiggle motion — `domain/shake.py`
-
-`shake_intensity` (above) gives a 0..1 *strength*. Turning that into the actual
-`(dx, dy)` pixel offset is the pure, stateful `ShakeMotion`. It is pure (no I/O)
-but holds state across frames (a phase accumulator + smoothed offset). The
-`WindowShaker` adapter only *applies* the offset this produces, and the
-standalone shake-tuning harness (`./shake`) drives this same class — so the
-wiggle feel is defined in exactly one place (DRY, edge-cases #10). Both the app
-and `./shake` read `SHAKE_*` from `.env` via `AppConfig`; `./shake --app-timing`
-uses the same `shake_intensity()` ramp as a live session.
-
-`ShakeMotion(cfg)` exposes:
-- `reset()` — drop all motion state (call when the wiggle window closes).
-- `offset(intensity, dt) -> (dx, dy)`:
-```
-if intensity <= 0:  reset(); return (0, 0)
-phase    += dt * shake_speed * (0.4 + intensity * 0.6)
-wave      = sin(phase)*0.65 + sin(phase*0.55 + 0.8)*0.35      # |wave| <= 1
-target_dx = shake_max_x * wave * intensity * sin(phase * shake_speed_x)
-target_dy = shake_max_y * wave * intensity * cos(phase * shake_speed_y + 0.4)
-dx        = lerp(dx, target_dx, dt, shake_smooth)
-dy        = lerp(dy, target_dy, dt, shake_smooth)
-return (dx, dy)
-```
-Two summed sines give an organic, non-repeating wobble; the `lerp` smooths it.
-Because `|wave|`, `intensity` and `|sin/cos|` are all ≤ 1, the offset is bounded
-by `±shake_max_x` / `±shake_max_y`.
 
 ---
 
@@ -272,62 +237,18 @@ no attendees, or you are the organiser, or your participant status is
 
 ---
 
-## 6. Block-end planning — `domain/blockend.py`
+## 6. Block-end tidy — adapter only
 
-The original `apply_block_end_actions` *decided* actions, *executed* AppleScript,
-*and* printed a summary — three responsibilities, one function, untestable. The
-refactor splits it: **planning is pure domain; execution is an adapter**
-([`BlockEndExecutor`](ports.md)).
+There is no domain planning step. After the stop overlay dismisses,
+`SessionRunner._run_cleanup()` activates the pre-block frontmost app and calls
+the [`WorkspaceTidy`](ports.md) port:
 
-### `BlockAction` enum
-`SKIP`, `QUIT`, `HIDE`, `MINIMIZE`.
+1. Option+⌘+H — hide every other app.
+2. Un-hide watch-mode `extra_skip` apps (host terminal).
+3. ⌘+M — minimize the front window unless the front app is skipped.
 
-### Name resolution
-App names from `.env` are matched leniently:
-- `expand_aliases(name) -> set[str]` — `"chrome"` → `{"Google Chrome", "Chrome"}`,
-  etc. (full table in [`configuration.md`](configuration.md)).
-- `name_in_list(name, list) -> bool` — true if `name` (after alias expansion,
-  case-insensitively) appears in `list`.
-
-### `plan_block_end(running_apps, foreground_apps, cfg, extra_skip) -> list[(name, BlockAction)]`
-Pure. Takes two name lists supplied by the adapter and returns an ordered plan.
-```
-skip = SYSTEM_SKIP ∪ cfg.block_end_skip ∪ extra_skip
-
-plan = []
-assigned = set()
-
-# Pass 1 — explicit lists, over EVERY running app (even windowless).
-for app in running_apps:
-    if app in skip or app in assigned: continue
-    if   name_in_list(app, cfg.block_end_quit):     assign(app, QUIT)
-    elif name_in_list(app, cfg.block_end_hide):     assign(app, HIDE)
-    elif name_in_list(app, cfg.block_end_minimize): assign(app, MINIMIZE)
-
-# Pass 2 — default action, over foreground apps only.
-for app in foreground_apps:
-    if app in skip or app in assigned: continue
-    assign(app, cfg.block_end_default)
-
-return plan
-```
-`SYSTEM_SKIP` = `{SystemUIServer, WindowManager, Dock, loginwindow, Python,
-python}` — never touched.
-
-`extra_skip` carries the host terminal in watch mode (so the watcher does not
-hide the terminal you are still typing into).
-
-> Why two passes: explicit `.env` lists should reach background/windowless apps
-> too (e.g. quit a music app with no front window), but the *default* action
-> should only sweep what is actually in front of you, so it does not minimise
-> every menu-bar agent on the machine.
-
-### Execution (adapter, not domain)
-`BlockEndExecutor.execute(plan) -> {minimize:int, hide:int, quit:int}`:
-- `QUIT` → terminate; on failure fall back to `HIDE`. **Finder is hidden, never
-  quit** (macOS refuses).
-- `HIDE` / `MINIMIZE` → AppleScript.
-- Returns counts; `app/` turns them into the summary line.
+Requires Accessibility permission for synthetic keyboard events. See
+[`features.md`](features.md) §8.
 
 ---
 
@@ -363,7 +284,7 @@ color:         RGB     # stroke colour (red-zone blend already applied)
 pulse_opacity: float
 pulse_spread:  float
 pulse_phase:   float   # animation phase, advances dt*0.85 per tick
-shake:         float   # 0..1 wiggle intensity (0 ⇒ overlay restores window)
+blur:          float   # 0..1 screen blur (ScreenBlur port)
 ```
 The overlay renders a `RenderFrame` and asks the domain nothing. Adding a visual
 = adding a field here.
@@ -421,7 +342,7 @@ frame = RenderFrame(
     pulse_opacity = pulse_opacity(remaining, cfg),
     pulse_spread  = pulse_spread(remaining, cfg),
     pulse_phase   = pulse_phase,
-    shake         = shake_intensity(remaining, cfg),
+    blur          = blur_intensity(remaining, cfg),
 )
 ```
 `dt` is wall-clock seconds since the previous tick, floored at the frame

@@ -182,7 +182,7 @@ explicit. Documented, deliberately not "fixed".
 
 ### Unverified surface
 The macOS adapters — `overlay.py`, `hud.py`, `stop_overlay.py`, `shaker.py`,
-`app_control.py`, `block_executor.py`, `calendar.py`, `runloop.py` — call
+`app_control.py`, `workspace_tidy.py`, `calendar.py`, `runloop.py` — call
 PyObjC / EventKit / Accessibility / AppleScript and **cannot be exercised on
 CI** (no Mac, no display). They are ported carefully and structurally
 1:1 with the original, but treat them as **unverified until run on a Mac**. The
@@ -276,14 +276,25 @@ and hit-tests the button screen rect. `mouseDown_` remains as the fast path.
 ### #32 — Screen frozen during block-end cleanup · Fixed
 
 `_run_cleanup()` called `stop_overlay.hide()` (which orders the windows out)
-and then immediately entered the synchronous `block_executor.execute()` pipeline
+and then immediately entered the synchronous `workspace_tidy.tidy_focused()` path
 (AppleScript calls, ~1 s total). `window.close()` enqueues a draw event but the
 run loop never pumped between the close and the AppleScript stall, so the black
 overlay remained visually composited on screen until cleanup finished.
 
 **Fix**: `scheduler.pump(0.05)` is called after both `hide()` calls and before
-`plan_block_end()`/`execute()`. This gives AppKit one run-loop cycle to composite
+`workspace_tidy.tidy_focused()`. This gives AppKit one run-loop cycle to composite
 the now-closed windows before the blocking I/O begins. Do not remove this pump.
+
+---
+
+### #35 — Finder re-activated immediately after being hidden · Fixed
+
+`_restore_focus` called `activate_finder()` as its unconditional fallback when
+the previously-frontmost app was in the block-end plan. If Finder itself was
+also in the plan (hidden or minimized), the fallback immediately un-hid it —
+hiding and unhiding Finder in the same cleanup pass.
+**Fix**: `_restore_focus` only calls `activate_finder()` when
+`"com.apple.finder"` is not in `acted_bundle_ids`.
 
 ---
 
@@ -300,9 +311,26 @@ already started.
 
 ---
 
-### #29 — `_finished_calendar_events` grows unbounded · Open
-The watcher remembers every fired calendar event id in a set so it does not
-re-trigger the same event; an id is only discarded once that event's start time
-passes. Across a multi-day watch session the set grows slowly. Harmless in
-practice (ids are small, sessions are hours not weeks) but unbounded. **Open**:
-a port could cap it or evict by age. Low priority.
+### #29 — `_finished_calendar_events` grows unbounded · Fixed
+The watcher remembers every fired calendar event id so it does not re-trigger
+the same event. The old `set[str]` only evicted an id when that exact event
+surfaced as the nearest future event again — which never happens once the event
+has started. IDs therefore accumulated for the life of the process.
+**Fix**: changed to `dict[str, dt.datetime]` (event_id → event_start).
+`_evict_stale_finished()` runs every calendar poll cycle (≈15 s) and removes
+any entry whose `event_start` is now in the past, regardless of what the
+calendar currently returns.
+
+---
+
+### #36 — Per-app AppleScript tidy was slow · Fixed
+
+The old `BlockEndExecutor` spawned `osascript` and walked every window of every
+foreground app via System Events Accessibility (`AXMinimized`), taking seconds
+with many windows open.
+
+**Fix**: replaced with `WorkspaceTidy` — two synthetic keyboard shortcuts
+(Option+⌘+H Hide Others, then ⌘+M Minimize) posted via `CGEvent` after
+activating the pre-block frontmost app. Requires Accessibility permission.
+Per-app `BLOCK_END_*` lists were removed; watch mode still un-hides the host
+terminal via `NSRunningApplication.unhide()` after Hide Others.

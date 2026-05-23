@@ -2,7 +2,7 @@
 # Run all manual tests in sequence, or one by name.
 # Usage:
 #   ./test_manual.sh                  — run all
-#   ./test_manual.sh shake
+#   ./test_manual.sh blur
 #   ./test_manual.sh stroke
 #   ./test_manual.sh glow
 #   ./test_manual.sh block_screen
@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TESTS=(shake stroke glow block_screen tidy calendar calendar_call calendar_room hard_stop)
+TESTS=(blur stroke glow block_screen tidy calendar calendar_call calendar_room hard_stop)
 
 run_test() {
     bash "manual_tests/$1.sh"
@@ -31,7 +31,7 @@ case "${1:-all}" in
         done
         echo; echo "━━ $pass passed, $fail failed ━━"
         ;;
-    shake|stroke|glow|block_screen|tidy|calendar|calendar_call|calendar_room|hard_stop)
+    blur|stroke|glow|block_screen|tidy|calendar|calendar_call|calendar_room|hard_stop)
         run_test "$1"
         ;;
     *)

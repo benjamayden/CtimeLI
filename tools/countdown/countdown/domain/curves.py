@@ -1,7 +1,7 @@
-"""Animation curves: edge glow and window wiggle. See docs/domain.md section 2.
+"""Animation curves: edge glow and screen blur. See docs/domain.md section 2.
 
 Each curve takes `remaining` (seconds left) and an AppConfig, and returns a
-number the overlay renders directly. The three curves are independent.
+number the overlay or blur port renders directly. The curves are independent.
 """
 
 from __future__ import annotations
@@ -46,12 +46,12 @@ def pulse_spread(remaining: float, cfg: AppConfig) -> float:
     return t**cfg.pulse_ramp_power
 
 
-def shake_intensity(remaining: float, cfg: AppConfig) -> float:
-    """Frontmost-window wiggle strength, 0 .. 1, only the final seconds.
+def blur_intensity(remaining: float, cfg: AppConfig) -> float:
+    """Full-screen blur strength, 0 .. 1, over the pulse (glow) window.
 
-    Zero until `remaining` drops below shake_wiggle_seconds, then ramps to 1.
+    Shares the glow window and spread ramp shape — blur starts when the edge
+    glow opens and reaches 1.0 at zero.
     """
-    wiggle = max(0.5, cfg.shake_wiggle_seconds)
-    if remaining <= 0.0 or remaining > wiggle:
-        return 0.0
-    return smoothstep(1.0 - remaining / wiggle)
+    if remaining <= 0.0:
+        return 1.0
+    return pulse_spread(remaining, cfg)

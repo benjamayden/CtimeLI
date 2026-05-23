@@ -87,13 +87,6 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
         "--pulse-depth-min",
         "--pulse-depth-max",
         "--pulse-visual-power",
-        "--shake-wiggle-seconds",
-        "--shake-max-x",
-        "--shake-max-y",
-        "--shake-speed",
-        "--shake-speed-x",
-        "--shake-speed-y",
-        "--shake-smooth",
         "--red-zone-fraction",
     ):
         group.add_argument(flag, type=float, default=None)
@@ -124,13 +117,6 @@ def _config_overrides(args: argparse.Namespace) -> dict[str, object]:
         "pulse_depth_max": args.pulse_depth_max,
         "pulse_ramp_power": _ramp_power(args),
         "pulse_visual_power": args.pulse_visual_power,
-        "shake_wiggle_seconds": args.shake_wiggle_seconds,
-        "shake_max_x": args.shake_max_x,
-        "shake_max_y": args.shake_max_y,
-        "shake_speed": args.shake_speed,
-        "shake_speed_x": args.shake_speed_x,
-        "shake_speed_y": args.shake_speed_y,
-        "shake_smooth": args.shake_smooth,
         "red_zone_fraction": args.red_zone_fraction,
         "block_on_end": args.block_on_end,
     }

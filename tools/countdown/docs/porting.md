@@ -84,7 +84,7 @@ implementing the same traits — Liskov holds by construction.
 | `StopOverlay` | full-screen modal `NSWindow` above screen-saver level | A fullscreen, focused Tauri window; set its level above the screen saver via `objc2` (`NSScreenSaverWindowLevel + 1`) since Tauri has no API for that. |
 | `WindowShaker` | Accessibility AX API | The **same Accessibility C API** via the `accessibility` crate or raw `objc2` — `AXUIElementCreateApplication`, `kAXPositionAttribute`. The logic is identical; only the FFI binding changes. |
 | `AppControl` | `NSWorkspace` / `NSApp` | `objc2-app-kit`: `NSWorkspace::sharedWorkspace`, `runningApplications`, activation policy. |
-| `BlockEndExecutor` | `NSRunningApplication.terminate` + `osascript` | `NSRunningApplication` terminate via `objc2`; for hide/minimize either keep `osascript` (`std::process::Command`) or use Accessibility `AXMinimized`. |
+| `BlockEndExecutor` / AppleScript tidy | `WorkspaceTidy` | `CGEvent` keyboard synthesis (Option+⌘+H, ⌘+M) + `NSRunningApplication.unhide` for watch-mode skip. |
 | `CalendarSource` | EventKit via PyObjC | EventKit via `objc2-event-kit`. The async permission request maps to a channel the `ensure_access` call blocks on. |
 | `InputSource` | non-blocking stdin (`fcntl`) | If watch mode keeps a terminal: a `std::thread` reading stdin into an `mpsc` channel (cleaner than `O_NONBLOCK` — and sidesteps bug #18 entirely). If watch mode becomes a GUI, this port disappears. |
 | `SignalListener` | `signal.signal` | The `ctrlc` crate, or `tokio::signal`. |

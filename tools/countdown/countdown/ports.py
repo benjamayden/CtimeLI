@@ -14,8 +14,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-from .domain.apps import RunningApp
-from .domain.blockend import BlockAction
+from .domain.apps import AppSelector, RunningApp
 from .domain.calendar import CalendarEvent
 from .domain.session import RenderFrame
 
@@ -102,17 +101,20 @@ class StopOverlay(Protocol):
 
 
 @runtime_checkable
-class WindowShaker(Protocol):
-    """Wiggles the frontmost window, then restores it exactly."""
+class ScreenBlur(Protocol):
+    """Progressive full-screen blur above the stroke/glow, below the block modal."""
 
-    def available(self) -> bool:
-        """Whether Accessibility is usable at all."""
+    def show(self) -> None:
+        """Create one click-through blur window per display."""
 
-    def apply(self, dx: float, dy: float) -> bool:
-        """Offset the frontmost window by (dx, dy) from its original position."""
+    def set_intensity(self, amount: float) -> None:
+        """Set blur strength 0..1 on every display."""
 
-    def restore(self) -> None:
-        """Return the tracked window to its original position. Idempotent."""
+    def hide(self) -> None:
+        """Order blur windows out. Idempotent."""
+
+    def teardown(self) -> None:
+        """Close and release everything. Idempotent."""
 
 
 @runtime_checkable
@@ -141,11 +143,11 @@ class AppControl(Protocol):
 
 
 @runtime_checkable
-class BlockEndExecutor(Protocol):
-    """Executes a block-end plan computed by the domain."""
+class WorkspaceTidy(Protocol):
+    """Hides other apps and minimizes the focused window after block-on-end."""
 
-    def execute(self, plan: list[tuple[str, BlockAction]]) -> dict[str, int]:
-        """Apply each (app, action). Return {minimize, hide, quit} counts."""
+    def tidy_focused(self, *, skip: frozenset[AppSelector]) -> None:
+        """Option+Cmd+H hide others, then Cmd+M minimize front unless skipped."""
 
 
 @runtime_checkable

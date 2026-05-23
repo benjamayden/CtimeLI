@@ -14,7 +14,7 @@ from enum import Enum
 from .calendar import hard_stop_stroke_base
 from .colors import RGB, STROKE_BLUE, stroke_color_for_fraction
 from .config import AppConfig
-from .curves import pulse_opacity, pulse_spread, shake_intensity
+from .curves import blur_intensity, pulse_opacity, pulse_spread
 from .math import clamp, format_duration, lerp
 
 # Target render cadence. The runner floors each frame's dt at this value so a
@@ -62,7 +62,7 @@ class RenderFrame:
     pulse_opacity: float
     pulse_spread: float
     pulse_phase: float
-    shake: float
+    blur: float
 
 
 class Session:
@@ -156,7 +156,7 @@ class Session:
             pulse_opacity=pulse_opacity(remaining, self.config),
             pulse_spread=pulse_spread(remaining, self.config),
             pulse_phase=self._pulse_phase,
-            shake=shake_intensity(remaining, self.config),
+            blur=blur_intensity(remaining, self.config),
         )
         if remaining <= 0.0:
             self._end(on_work_wifi=on_work_wifi)

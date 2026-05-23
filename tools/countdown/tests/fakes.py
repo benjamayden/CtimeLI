@@ -9,8 +9,7 @@ from __future__ import annotations
 import datetime as dt
 
 from countdown import ports
-from countdown.domain.apps import RunningApp
-from countdown.domain.blockend import BlockAction
+from countdown.domain.apps import AppSelector, RunningApp
 from countdown.domain.calendar import CalendarEvent
 from countdown.domain.session import RenderFrame
 
@@ -113,23 +112,26 @@ class FakeStopOverlay:
         self.hidden = True
 
 
-class FakeShaker:
-    """WindowShaker that records offsets."""
+class FakeScreenBlur:
+    """ScreenBlur that records intensities and lifecycle calls."""
 
-    def __init__(self, available: bool = True) -> None:
-        self._available = available
-        self.applied: list[tuple[float, float]] = []
-        self.restores = 0
+    def __init__(self) -> None:
+        self.shown = False
+        self.hidden = False
+        self.torn_down = False
+        self.intensities: list[float] = []
 
-    def available(self) -> bool:
-        return self._available
+    def show(self) -> None:
+        self.shown = True
 
-    def apply(self, dx: float, dy: float) -> bool:
-        self.applied.append((dx, dy))
-        return self._available
+    def set_intensity(self, amount: float) -> None:
+        self.intensities.append(amount)
 
-    def restore(self) -> None:
-        self.restores += 1
+    def hide(self) -> None:
+        self.hidden = True
+
+    def teardown(self) -> None:
+        self.torn_down = True
 
 
 class FakeAppControl:
@@ -174,16 +176,14 @@ class FakeAppControl:
         self.policies.append(policy)
 
 
-class FakeBlockExecutor:
-    """BlockEndExecutor that records the plan and returns scripted counts."""
+class FakeWorkspaceTidy:
+    """WorkspaceTidy that records tidy_focused calls."""
 
-    def __init__(self, counts: dict[str, int] | None = None) -> None:
-        self.executed: list[tuple[str, BlockAction]] | None = None
-        self._counts = counts or {"minimize": 0, "hide": 0, "quit": 0}
+    def __init__(self) -> None:
+        self.tidy_calls: list[frozenset[AppSelector]] = []
 
-    def execute(self, plan: list[tuple[str, BlockAction]]) -> dict[str, int]:
-        self.executed = list(plan)
-        return self._counts
+    def tidy_focused(self, *, skip: frozenset[AppSelector]) -> None:
+        self.tidy_calls.append(skip)
 
 
 class FakeCalendar:

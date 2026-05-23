@@ -1,13 +1,11 @@
-"""Manifest format and block-end CSV resolution. See docs/domain.md.
+"""Manifest format for ./run apps. See docs/domain.md.
 
 parse_manifest / format_manifest own the apps.manifest file format.
-resolve_block_end_csv converts a BLOCK_END_* CSV value to AppSelectors,
-resolving numeric indices against the manifest.
 """
 
 from __future__ import annotations
 
-from .apps import AppSelector, is_valid_bundle_id
+from .apps import is_valid_bundle_id
 
 
 def parse_manifest(text: str) -> dict[int, str]:
@@ -41,37 +39,3 @@ def format_manifest(index_to_bundle_id: dict[int, str]) -> str:
     for idx in sorted(index_to_bundle_id):
         lines.append(f"{idx}={index_to_bundle_id[idx]}")
     return "\n".join(lines) + "\n"
-
-
-def resolve_block_end_csv(
-    raw_csv: str,
-    manifest: dict[int, str],
-) -> tuple[frozenset[AppSelector], list[str]]:
-    """Convert a BLOCK_END_* CSV string to a set of AppSelectors.
-
-    Numeric tokens: resolved via manifest → AppSelector(kind="bundle_id").
-    Non-numeric tokens: kept as AppSelector(kind="display_name") for legacy compat.
-    Returns (selectors, unresolved_indices) where unresolved are numeric tokens
-    not found in the manifest (caller should log a warning per token).
-    """
-    raw = raw_csv.strip()
-    if not raw:
-        return frozenset(), []
-
-    selectors: set[AppSelector] = set()
-    unresolved: list[str] = []
-
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        if token.isdigit():
-            bundle_id = manifest.get(int(token))
-            if bundle_id:
-                selectors.add(AppSelector(kind="bundle_id", value=bundle_id))
-            else:
-                unresolved.append(token)
-        else:
-            selectors.add(AppSelector(kind="display_name", value=token))
-
-    return frozenset(selectors), unresolved

@@ -2,16 +2,7 @@
 
 import pytest
 
-from countdown.domain.apps import AppSelector
 from countdown.domain.config import AppConfig
-
-
-def _dn(value: str) -> AppSelector:
-    return AppSelector(kind="display_name", value=value)
-
-
-def _bid(value: str) -> AppSelector:
-    return AppSelector(kind="bundle_id", value=value)
 
 
 def test_defaults_when_mapping_empty():
@@ -30,50 +21,6 @@ def test_float_and_bool_parsing():
 def test_bool_truthiness(raw, expected):
     cfg, _ = AppConfig.from_mapping({"BLOCK_ON_END": raw})
     assert cfg.block_on_end is expected
-
-
-def test_csv_parsing_display_names():
-    cfg, warnings = AppConfig.from_mapping({"BLOCK_END_MINIMIZE": "Chrome, Notes ,"})
-    assert cfg.block_end_minimize == frozenset({_dn("Chrome"), _dn("Notes")})
-    assert warnings == []
-
-
-def test_csv_parsing_with_manifest_resolves_bundle_id():
-    manifest = {1: "com.google.Chrome", 2: "com.apple.Notes"}
-    cfg, warnings = AppConfig.from_mapping({"BLOCK_END_QUIT": "1,2"}, manifest=manifest)
-    assert cfg.block_end_quit == frozenset({
-        _bid("com.google.Chrome"),
-        _bid("com.apple.Notes"),
-    })
-    assert warnings == []
-
-
-def test_csv_parsing_stale_index_emits_warning():
-    manifest = {1: "com.google.Chrome"}
-    cfg, warnings = AppConfig.from_mapping({"BLOCK_END_QUIT": "99"}, manifest=manifest)
-    assert cfg.block_end_quit == frozenset()
-    assert any("99" in w for w in warnings)
-
-
-def test_csv_parsing_mixed_numeric_and_display():
-    manifest = {1: "com.google.Chrome"}
-    cfg, warnings = AppConfig.from_mapping(
-        {"BLOCK_END_HIDE": "1,safari"}, manifest=manifest
-    )
-    assert _bid("com.google.Chrome") in cfg.block_end_hide
-    assert _dn("safari") in cfg.block_end_hide
-    assert warnings == []
-
-
-def test_csv_parsing_no_manifest_numeric_is_unresolved():
-    cfg, warnings = AppConfig.from_mapping({"BLOCK_END_QUIT": "1"})
-    assert cfg.block_end_quit == frozenset()
-    assert any("1" in w for w in warnings)
-
-
-def test_invalid_block_end_action_falls_back():
-    cfg, _ = AppConfig.from_mapping({"BLOCK_END_DEFAULT": "banana"})
-    assert cfg.block_end_default == "minimize"
 
 
 def test_pulse_ramp_preset():

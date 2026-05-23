@@ -51,27 +51,25 @@ peripheral-vision nudge that does not demand focus.
 **Acceptance**: with >120 s remaining there is no glow; inside the window the
 glow is visible and deepens monotonically toward zero.
 
-## 4. Frontmost-window wiggle
+## 4. Screen blur
 
-In the very last seconds the *frontmost application's window* physically
-oscillates — a hard-to-ignore "wrap it up" signal.
+In the final stretch the desktop **blurs progressively** — a peripheral nudge
+that does not move windows or cause motion sickness.
 
-- Active only for the final `shake_wiggle_seconds` (default `3`).
-- Intensity ramps `0 → 1` via smoothstep across those seconds.
-- Motion is a smoothed two-frequency sine on both axes; the window's original
-  position is **always restored** when the wiggle ends or the session stops.
-- Certain apps are **never** wiggled: the host terminal, editors used to launch
-  it (Cursor, VS Code), the Python process itself, and system UI
-  (Dock, WindowManager, …). See [`configuration.md`](configuration.md).
-- Requires macOS Accessibility permission. Without it the feature disables
-  itself with one warning and the rest of the app runs normally.
-- Tune motion in `.env` (`SHAKE_*`); preview with `./shake --app-timing`. See
-  [`configuration.md`](configuration.md) §"Window wiggle".
+- Active for the last `pulse_before_secs` seconds (default `120`) — the same
+  window as the edge glow.
+- Intensity ramps `0 → 1` across that window, shaped by `pulse_ramp_power`
+  (`1` = linear, `3` = late/cubic) via `blur_intensity()` in [`domain.md`](domain.md).
+- Rendered as a full-screen frosted-glass layer **above** the stroke/glow and
+  **below** the HUD and block modal.
+- At zero the screen is fully obscured; if `block_on_end` is on, the blur
+  **persists** under the semi-transparent stop overlay and clears on dismiss.
+- Always click-through — never intercepts mouse events.
 
-**Acceptance**: with >3 s left, no window moves; in the last 3 s the frontmost
-window wiggles with rising amplitude; after zero (or on quit) it sits exactly
-where it started. `./shake --app-timing` with a non-terminal window focused
-should feel the same in the final `SHAKE_WIGGLE_SECONDS`.
+**Acceptance**: with >120 s remaining there is no blur; inside the window blur
+deepens monotonically toward zero; at zero the desktop is unreadable; with
+`block_on_end` on the blurred desktop remains visible through the stop overlay
+until dismiss.
 
 ## 5. The HUD
 
@@ -117,34 +115,23 @@ and triggers the tidy.
 After the stop overlay is dismissed, the app tidies your workspace so you
 actually leave it.
 
-Each running GUI app is assigned **one** action:
+The tidy runs in two keyboard-shortcut steps on the app that was frontmost when
+the block fired:
 
-| Action | Effect |
-|--------|--------|
-| `minimize` | Minimise the app's windows. |
-| `hide` | Hide the app (`⌘H` equivalent). |
-| `quit` | Terminate the app; if termination fails, fall back to hide. |
-| `skip` | Leave the app untouched. |
+1. **Option+⌘+H** — hide every other app (Hide Others).
+2. **⌘+M** — minimize the focused app's front window.
 
-Assignment precedence (first match wins):
+In watch mode the host terminal is automatically un-hidden after step 1 and is
+never minimized if it was the focused app.
 
-1. App is in the system-skip set or `block_end_skip` → **skip**.
-2. App is in `block_end_quit` → **quit**.
-3. App is in `block_end_hide` → **hide**.
-4. App is in `block_end_minimize` → **minimize**.
-5. Otherwise → `block_end_default` (default `minimize`).
+Requires **Accessibility** permission (System Settings → Privacy & Security →
+Accessibility) so synthetic key events can be posted.
 
-Notes:
-- Explicit lists act on **every** running instance; the default acts on
-  apps with a visible foreground presence.
-- App names accept aliases — `chrome` resolves to *Google Chrome*. Full alias
-  table in [`configuration.md`](configuration.md).
-- Finder is never terminated (macOS forbids it) — it is hidden instead.
-- After tidying, focus returns to the launching terminal (or Finder).
+After tidying, focus returns to the launching terminal (or Finder).
 
-**Acceptance**: given a config and a set of running apps, each app receives
-exactly the action the precedence table dictates; a one-line summary is
-reported (`Block end: minimized 3 windows, quit 1 app.`).
+**Acceptance**: dismiss is near-instant; other visible apps are hidden; the
+focused app is minimized into the Dock; terminal prints
+`Block end: hid other apps, minimized focused window.`
 
 ## 9. Watch mode
 
@@ -194,7 +181,7 @@ permission gap:
 
 | Missing | Behaviour |
 |---------|-----------|
-| Accessibility permission / `ApplicationServices` | Wiggle disabled; one warning; everything else runs. |
+| Accessibility permission / `ApplicationServices` | Block-end tidy no-ops; one warning; countdown still runs. |
 | `EventKit` / Calendar Full Access | Calendar auto-start disabled; one warning; manual + quick-add still work. |
 | A display unplugged mid-session | Remaining displays keep rendering. |
 

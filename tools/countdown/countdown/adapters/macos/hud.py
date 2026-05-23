@@ -90,7 +90,7 @@ class CountdownHUDWindow(AppKit.NSWindow):
         if self is None:
             return None
         self._button_down = False
-        self.setLevel_(AppKit.NSStatusWindowLevel + 3)
+        self.setLevel_(AppKit.NSStatusWindowLevel + 4)
         self.setOpaque_(False)
         self.setBackgroundColor_(AppKit.NSColor.clearColor())
         self.setIgnoresMouseEvents_(False)

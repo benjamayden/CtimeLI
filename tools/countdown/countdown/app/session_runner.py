@@ -10,11 +10,9 @@ from __future__ import annotations
 import datetime as dt
 
 from countdown import ports
-from countdown.domain.apps import AppSelector
-from countdown.domain.blockend import block_end_summary, plan_block_end
+from countdown.domain.apps import AppSelector, RunningApp, app_matches_selector
 from countdown.domain.calendar import is_work_wifi
 from countdown.domain.session import FRAME_INTERVAL, Session, SessionKind, SessionState
-from countdown.domain.shake import ShakeMotion
 
 _DISMISS_HINT = "Click anywhere to tidy windows · Return · or Ctrl+C"
 _DEFAULT_STOP_LINES = [
@@ -52,9 +50,9 @@ class SessionRunner:
         scheduler: ports.FrameScheduler,
         overlay: ports.CountdownOverlay,
         stop_overlay: ports.StopOverlay,
-        shaker: ports.WindowShaker,
+        blur: ports.ScreenBlur,
         app_control: ports.AppControl,
-        block_executor: ports.BlockEndExecutor,
+        workspace_tidy: ports.WorkspaceTidy,
         signals: ports.SignalListener,
         url_opener: ports.UrlOpener,
         wifi: ports.WifiSource,
@@ -66,15 +64,14 @@ class SessionRunner:
         self.scheduler = scheduler
         self.overlay = overlay
         self.stop_overlay = stop_overlay
-        self.shaker = shaker
+        self.blur = blur
         self.app_control = app_control
-        self.block_executor = block_executor
+        self.workspace_tidy = workspace_tidy
         self.signals = signals
         self.url_opener = url_opener
         self.wifi = wifi
         # Apps the block-end tidy must leave alone (the host terminal in watch).
         self.extra_skip = extra_skip
-        self._motion = ShakeMotion(session.config)
         self._setup_done = False
         self._torn_down = False
         self._interrupt_seen = False
@@ -130,6 +127,7 @@ class SessionRunner:
         self.session.start()
         self.app_control.set_activation_policy(ports.ActivationPolicy.ACCESSORY)
         self.overlay.show()
+        self.blur.show()
         self._last_tick = self.clock.now()
 
     def _frame_dt(self, now: dt.datetime) -> float:
@@ -160,24 +158,16 @@ class SessionRunner:
             frame = self.session.tick(now, dt_seconds, on_work_wifi=on_work)
             if self.session.state is SessionState.RUNNING:
                 self.overlay.render(frame)
-                self._apply_shake(frame.shake, dt_seconds)
+                self.blur.set_intensity(frame.blur)
         if self.session.state is SessionState.BLOCKING:
             self._enter_blocking()
         elif self.session.state is SessionState.DONE:
             self._maybe_open_call_link()
 
-    def _apply_shake(self, intensity: float, dt_seconds: float) -> None:
-        if intensity <= 0.0 or not self.shaker.available():
-            self._motion.reset()
-            self.shaker.restore()
-            return
-        dx, dy = self._motion.offset(intensity, dt_seconds)
-        self.shaker.apply(dx, dy)
-
     def _enter_blocking(self) -> None:
         self._restore_focus_pid = self.app_control.frontmost_pid()
-        self.shaker.restore()
         self.overlay.hide()
+        self.blur.set_intensity(1.0)
         self.app_control.set_activation_policy(ports.ActivationPolicy.REGULAR)
         self.stop_overlay.show(_stop_lines(self.session))
 
@@ -201,40 +191,34 @@ class SessionRunner:
 
     def _run_cleanup(self) -> None:
         self.stop_overlay.hide()
+        self.blur.hide()
         self.overlay.hide()
-        # Pump the run loop so the screen repaints before the AppleScript calls.
         self.scheduler.pump(0.05)
-        plan = plan_block_end(
-            self.app_control.running_apps(),
-            self.app_control.foreground_apps(),
-            self.session.config,
-            self.extra_skip,
-        )
-        counts = self.block_executor.execute(plan)
-        summary = block_end_summary(counts)
-        if summary:
-            self.logger.info(summary)
-        self._restore_focus({bundle_id for bundle_id, _ in plan})
+        self.app_control.set_activation_policy(ports.ActivationPolicy.PROHIBITED)
+        if self._restore_focus_pid is not None:
+            self.app_control.activate_pid(self._restore_focus_pid)
+        self.scheduler.pump(0.05)
+        self.workspace_tidy.tidy_focused(skip=self.extra_skip)
+        self.logger.info("Block end: hid other apps, minimized focused window.")
+        self._restore_focus()
 
-    def _restore_focus(self, acted_bundle_ids: set[str]) -> None:
-        """Return focus to where it was — unless that app was just tidied."""
+    def _restore_focus(self) -> None:
+        """Return focus to the host terminal, or the pre-block app if it was skipped."""
         pid = self._restore_focus_pid
         if pid is not None:
             app = self.app_control.app_for_pid(pid)
-            if app is not None:
-                bundle_id = app.bundle_id
-                if bundle_id is None or bundle_id not in acted_bundle_ids:
-                    if self.app_control.activate_pid(pid):
-                        return
-        # Don't re-activate Finder if we just hid or minimized it.
-        if "com.apple.finder" not in acted_bundle_ids:
-            self.app_control.activate_finder()
+            if app is not None and any(
+                app_matches_selector(app, sel) for sel in self.extra_skip
+            ):
+                if self.app_control.activate_pid(pid):
+                    return
+        self.app_control.activate_finder()
 
     def _teardown(self) -> None:
         if self._torn_down:
             return
         self._torn_down = True
-        self.shaker.restore()
+        self.blur.teardown()
         self.overlay.teardown()
         self.stop_overlay.hide()
         self.scheduler.stop()

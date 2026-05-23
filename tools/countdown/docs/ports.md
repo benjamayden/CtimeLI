@@ -11,8 +11,8 @@ port to another framework, you re-implement the adapters — the Port contracts 
 not change.
 
 Design rules for Ports (apply when adding one):
-- **Narrow.** Expose what the app needs, not what the SDK offers. `WindowShaker`
-  has `apply`/`restore`, not `AXUIElementCopyAttributeValue`.
+- **Narrow.** Expose what the app needs, not what the SDK offers. `ScreenBlur`
+  has `set_intensity`, not `NSVisualEffectView`.
 - **Domain types only.** Port signatures use `datetime`, `RGB`, `RenderFrame`,
   `CalendarEvent` — never `NSWindow`, `EKEvent`, `AXUIElement`.
 - **Total, not partial.** A port method either succeeds or degrades visibly
@@ -129,29 +129,25 @@ controller). `lines` is data so future session kinds can supply their own copy
 
 ---
 
-## `WindowShaker`
+## `ScreenBlur`
 
-**Purpose** — wiggle the frontmost window in the final seconds, then restore it.
+**Purpose** — progressive full-screen frosted glass above the stroke/glow, below
+the HUD and block modal.
 
 | Method | Contract |
 |--------|----------|
-| `apply(dx, dy) -> bool` | Offset the current frontmost window by `(dx, dy)` from its **original** position. Returns `False` if there is no target or permission is missing. |
-| `restore()` | Return the tracked window to its original position; clear tracking. Idempotent and safe to call when nothing is tracked. |
-| `available() -> bool` | Whether Accessibility is usable at all. |
+| `show()` | Create one borderless, click-through blur window per display. |
+| `set_intensity(amount)` | Set blur strength `0..1` on every display. At `0` windows are hidden. |
+| `hide()` | Order blur windows out. Idempotent. |
+| `teardown()` | Close and release everything. Idempotent. |
 
-**Invariant** — the window's *original* position is captured the first time it
-is seen and is the reference for every `apply`; `restore()` must put it back
-exactly. If the frontmost window changes, the previous one is restored first.
-**Failure** — no Accessibility permission ⇒ `available()` is `False`, `apply` is
-a no-op, the app logs **one** warning and carries on.
-**Adapter** — `macos/shaker.py` (AX: `AXUIElementCreateApplication`,
-`AXPosition` get/set). The standalone tuning harness `shake_tune.py` (`./shake`)
-imports this adapter and loads shake settings from `.env` via `build_config()`.
-It no longer duplicates the AX code or hardcodes motion defaults.
+**Lifecycle** — `show` at session start; `set_intensity` each RUNNING frame; at
+block-on-end the runner sets `1.0` and **does not hide** blur while the stop
+overlay is up; `hide` on cleanup dismiss; `teardown` at session end.
 
-> **Smell fixed.** The old `shake_test.py` had a near-identical copy of the
-> shake logic (`ShakeTester`). The harness (renamed `shake_tune.py`) now drives
-> the real `WindowShaker`. See [`edge-cases.md`](edge-cases.md) #10.
+**Failure** — a display vanishing mid-session must not crash; skip it.
+**Adapter** — `macos/blur.py` (`BlurWindow` + `NSVisualEffectView`).
+**Fake** — `FakeScreenBlur`.
 
 ---
 
@@ -177,27 +173,20 @@ Automation permission required).
 
 ---
 
-## `BlockEndExecutor`
+## `WorkspaceTidy`
 
-**Purpose** — *execute* a block-end plan. The **plan is computed in the domain**
-([`domain.md`](domain.md) §6); this port only carries it out.
+**Purpose** — hide other apps and minimize the focused window after block-on-end.
 
 | Method | Contract |
 |--------|----------|
-| `execute(plan: list[(str, BlockAction)]) -> Counts` | Apply each `(app, action)`. `QUIT` → terminate, falling back to `HIDE` on failure; **Finder is hidden, never quit**. Return `{minimize, hide, quit}` counts. |
+| `tidy_focused(*, skip) -> None` | Post Option+⌘+H (Hide Others), un-hide any `skip` apps, then ⌘+M on the frontmost unless it matches `skip`. |
 
-**Pre** — `plan` already excludes skipped apps (the domain did that).
-**Post** — counts reflect what actually happened (a failed quit that fell back
-to hide increments `hide`, not `quit`).
-**Failure** — a single app that will not quit is logged and counted as a
-fallback; it never aborts the rest of the plan.
-**Adapter** — `macos/block_executor.py` (`NSRunningApplication.terminate` +
-`osascript` System Events for hide/minimize).
-
-> **Smell fixed.** The original `apply_block_end_actions` planned, executed and
-> printed in one 60-line function. Planning is now pure domain, execution is
-> this port, the summary line is the app layer's. See
-> [`edge-cases.md`](edge-cases.md) #22.
+**Pre** — the caller has already activated the pre-block frontmost app.
+**Post** — other apps are hidden; the focused app's front window is minimized
+unless skipped.
+**Failure** — without Accessibility permission, logs one warning and no-ops.
+**Adapter** — `macos/workspace_tidy.py` (`CGEvent` keyboard synthesis +
+`NSRunningApplication.unhide` for watch-mode terminal skip).
 
 ---
 
@@ -308,9 +297,9 @@ into the app or domain.
 | `FrameScheduler` | `runloop.MacScheduler` | `FakeScheduler` |
 | `CountdownOverlay` | `overlay.MacOverlay` (+ HUD) | `FakeOverlay` |
 | `StopOverlay` | `stop_overlay.MacStopOverlay` | `FakeStopOverlay` |
-| `WindowShaker` | `shaker.MacShaker` | `FakeShaker` |
+| `ScreenBlur` | `blur.MacScreenBlur` | `FakeScreenBlur` |
 | `AppControl` | `app_control.MacAppControl` | `FakeAppControl` |
-| `BlockEndExecutor` | `block_executor.MacBlockExecutor` | `FakeBlockExecutor` |
+| `WorkspaceTidy` | `workspace_tidy.MacWorkspaceTidy` | `FakeWorkspaceTidy` |
 | `CalendarSource` | `calendar.EventKitCalendar` | `FakeCalendar` |
 | `UrlOpener` | `url_opener.MacUrlOpener` | `FakeUrlOpener` |
 | `WifiSource` | `wifi.SystemWifi` | `FakeWifiSource` |

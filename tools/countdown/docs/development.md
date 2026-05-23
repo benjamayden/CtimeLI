@@ -49,8 +49,7 @@ expected outputs.
   [`domain.md`](domain.md) §4**, including the ambiguous-hour and error cases.
 - `test_calendar.py` — `calendar_block_target`, `hard_stop_target`, `is_work_wifi`.
 - `test_calendar_fields.py` — URL/room parsing from EventKit text fields.
-- `test_blockend.py` — `plan_block_end`: precedence, alias expansion, the
-  two-pass running-vs-foreground rule, skip sets.
+- `test_keyboard.py` — shortcut key-code constants (Linux-safe).
 - `test_config.py` — `AppConfig.from_mapping` parsing and `merge` (unknown
   override keys rejected — #6).
 - `test_session.py` — **the whole transition table** ([`domain.md`](domain.md)
@@ -64,7 +63,7 @@ port, see [`ports.md`](ports.md) summary table). A `SessionRunner` test:
 1. Build `SessionRunner` with `FakeClock`, `FakeScheduler`, `FakeOverlay`, …
 2. Advance `FakeClock`, hand-drive frames via `FakeScheduler`.
 3. Assert on what the fakes recorded — `FakeOverlay.frames`, `FakeLogger.lines`,
-   `FakeBlockExecutor.executed`.
+   `FakeWorkspaceTidy.tidy_calls`.
 
 This catches orchestration bugs (does zero trigger the stop overlay? does
 `CLEANUP` run the plan exactly once?) with **no Mac and no display**.
@@ -136,7 +135,7 @@ old code or old notes.
 | `countdown.py` | `calendar_block_target`, `calendar_stroke_base` | `domain/calendar.py` |
 | `countdown.py` | `_action_for_process`, alias tables, `_expand_block_end_names` | `domain/blockend.py` |
 | `countdown.py` | `apply_block_end_actions` (planning half) | `domain/blockend.py::plan_block_end` |
-| `countdown.py` | `apply_block_end_actions` (execution half) | `adapters/macos/block_executor.py` |
+| `countdown.py` | `apply_block_end_actions` (execution) | `adapters/macos/workspace_tidy.py` |
 | `config.py` | `AppConfig`, `merge_cli` → `merge`, env parsers | `domain/config.py` *(pure value object)* |
 | `config.py` | `load_dotenv` | `adapters/system/dotenv.py` *(no env mutation, #5)* |
 | `countdown.py` | `CountdownApp` (lifecycle/state) | `domain/session.py` + `app/session_runner.py` |
