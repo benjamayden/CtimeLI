@@ -116,9 +116,7 @@ def test_block_on_end_dismiss_runs_cleanup():
     h.clock.advance(5.0)
     h.runner.pump()  # -> BLOCKING
     h.stop_overlay.dismiss = True
-    h.runner.pump()  # -> CLEANUP
-    assert h.session.state is SessionState.CLEANUP
-    assert h.runner.pump() is False  # CLEANUP runs, -> DONE, torn down
+    assert h.runner.pump() is False  # dismiss -> CLEANUP -> DONE in one pump
     assert h.workspace_tidy.tidy_calls
     assert h.session.state is SessionState.DONE
     assert any("Block end" in line for line in h.logger.info_lines)
@@ -231,9 +229,8 @@ def test_skipped_app_regains_focus_after_cleanup():
     h.runner.pump()
     # Skip app is activated twice: once before tidy, once in _restore_focus.
     assert h.runner.app_control.activated_pids == [99, 99]
-    assert h.workspace_tidy.tidy_calls[-1] == frozenset(
-        {AppSelector(kind="display_name", value="Terminal")}
-    )
+    skip, _pump = h.workspace_tidy.tidy_calls[-1]
+    assert skip == frozenset({AppSelector(kind="display_name", value="Terminal")})
 
 
 def test_remote_call_opens_url_and_skips_stop_overlay():

@@ -121,10 +121,11 @@ class MacScreenBlur:
         for window in self._windows:
             window.orderOut_(None)
 
-    def teardown(self) -> None:
+    def teardown(self, *, close: bool = True) -> None:
         for window in self._windows:
             window.orderOut_(None)
-            window.close()
+            if close:
+                window.close()
         self._windows.clear()
         self._shown = False
         self._intensity = 0.0

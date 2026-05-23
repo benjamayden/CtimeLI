@@ -74,6 +74,18 @@ def test_retarget_grows_total_but_never_shrinks_it():
     assert original_total == 60.0
 
 
+def test_retarget_extends_deadline_forward():
+    session = make_session(duration=60.0)
+    session.start()
+    at = STARTED + dt.timedelta(seconds=10)
+    extended = session.target + dt.timedelta(minutes=15)
+    assert session.retarget(extended, at) is True
+    assert session.target == extended
+    assert session.total_seconds == (extended - session.started).total_seconds()
+    remaining = (session.target - at).total_seconds()
+    assert remaining > (STARTED + dt.timedelta(seconds=60) - at).total_seconds()
+
+
 def test_retarget_into_the_past_is_ignored():
     session = make_session(duration=60.0)
     session.start()

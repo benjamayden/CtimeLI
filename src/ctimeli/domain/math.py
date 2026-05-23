@@ -42,3 +42,13 @@ def format_duration(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def format_duration_compact(seconds: float) -> str:
+    """Compact clock-style duration for narrow UI (menu bar): ``1:04`` / ``1:01:01``."""
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"

@@ -129,12 +129,72 @@ stroke and wiggle freeze. **Guard**: `dt` is floored at `FRAME_INTERVAL`
 (`1/60 s`) before it reaches any smoother. Keep this floor.
 
 ### #18 — `O_NONBLOCK` left on stdin · Fixed
-Watch mode set `O_NONBLOCK` on file descriptor `0` to poll stdin and **never
-cleared it**. That flag belongs to the open file description *shared with the
-parent shell* — after the watcher exited, the user's terminal could start
-throwing `BlockingIOError` on reads. A genuine, user-visible bug. **Fix**: the
-`InputSource` port mandates `close()`, which restores the original flags; the
-runner calls it in a `finally`.
+Watch mode originally set `O_NONBLOCK` on file descriptor `0` to poll stdin and
+**never cleared it**. That flag belongs to the open file description *shared with
+the parent shell* — after the watcher exited, the user's terminal could start
+throwing `BlockingIOError` on reads. **Fix**: the `InputSource` port mandates
+`close()`, which restores the original flags; the runner calls it in a `finally`.
+Watch mode now spawns a detached subprocess and uses `NullInputSource` in the
+child, so stdin EOF no longer ends the watcher (see #36).
+
+### #36 — Watch mode tied to terminal stdin · Fixed
+The original watcher quit on stdin EOF, so closing the launch terminal killed
+watch mode. It also relied on typed quick-add. **Fix**: watch launches a detached
+subprocess (`spawn_detached_watch`); the parent prints a status line and exits;
+the child uses the menu bar (`WatchMenuBar` port) and `NullInputSource`.
+Calendar/hard-stop trumping cannot be disabled without Quit.
+
+### #37 — `fork()` after PyObjC aborts the child · Fixed
+An early implementation used `os.fork()` to background watch mode. After the
+launcher imports AppKit/PyObjC, macOS aborts the fork child with
+`* multi-threaded process forked *`. **Fix**: spawn a fresh
+`python -m ctimeli watch` subprocess with `start_new_session=True` instead of
+forking the already-initialized interpreter.
+
+### #38 — Status-bar menu clicks ignored · Fixed
+The first menu-bar adapter attached an `NSMenu` via `setMenu_` with a custom
+`NSMenuItem` view. Clicks did nothing because the watch loop never pumped
+`NSModalPanelRunLoopMode` (required for menus/alerts) and custom menu views are
+unreliable on status items. **Fix**: manual `popUpMenuPositioningItem:` on
+button click, standard menu items, `NSAlert` for minutes input, and pump modal
+panel mode in `runloop.py`.
+
+### #39 — Watch child crashed before showing the icon · Fixed
+`NSStatusBarButton` has no `setSendActionOn_` in PyObjC — calling it raised
+`AttributeError` in `show()`, killing the detached child while stderr was
+`/dev/null`. **Fix**: drop that call; always show a visible `⏱` title; set
+accessory activation policy before creating the item; log child output to
+`~/.cache/ctimeli/watch.log`.
+
+### #40 — `BrokenPipeError` in detached watch on calendar warn · Fixed
+The detached child logged calendar-denial warnings to stderr; when the spawn
+pipe closed, `StderrLogger.warn` raised `BrokenPipeError` and killed watch.
+**Fix**: ignore `SIGPIPE` in the watch child, swallow broken-pipe writes in
+`StderrLogger`, and redirect spawn stdout/stderr via a dedicated fd passed to
+`Popen`.
+
+### #41 — Status item never appeared despite “Watcher ready” · Fixed
+Watch called `_init_appkit()` → `finishLaunching()` before setting an
+`NSApplication` delegate, then created the `NSStatusItem` outside
+`applicationDidFinishLaunching`. Cocoa accepts the setup but the item never
+draws. Repeated `./run watch` also stacked multiple background children.
+**Fix**: install the status item from an app delegate in
+`applicationDidFinishLaunching_` (with a direct fallback), skip early
+`finishLaunching` on the watch path, call `setVisible_(True)`, show the text
+label **CtimeLI**, and guard with `WatchInstanceLock` so only one watch child
+runs.
+
+### #42 — Status-bar icon visible but menu clicks ignored · Fixed
+After #41 the icon drew, but clicks did nothing. Root causes (all required):
+1. Manual ``pump_run_loop`` / while-loop could not deliver status-bar events —
+   watch must run on ``PyObjCTools.AppHelper.runEventLoop`` with ticks via
+   ``callLater``.
+2. ``_update_menu_bar`` called ``set_status`` / ``set_idle`` every 100 ms even
+   when unchanged, repeatedly mutating ``NSStatusBarButton`` and breaking menu
+   tracking — only update on change; skip bar refresh while the menu is open.
+3. Wrong PyObjC constant ``NSStatusItemSquareLength`` (use
+   ``NSSquareStatusItemLength``); attach menu via ``NSStatusItem.setMenu_``;
+   icon-only idle state (timer SF Symbol, no title text).
 
 ### #21 — Synchronous quit can stall the loop · Guarded
 `BlockEndExecutor` waits up to ~1 s (polling) for an app to actually terminate
@@ -336,3 +396,63 @@ with many windows open.
 activating the pre-block frontmost app. Requires Accessibility permission.
 Per-app `BLOCK_END_*` lists were removed; watch mode still un-hides the host
 terminal via `NSRunningApplication.unhide()` after Hide Others.
+
+---
+
+### #43 — Accessibility permission never prompted · Fixed
+
+`MacWorkspaceTidy` only checked `AXIsProcessTrusted()` at tidy time and logged
+a warning — macOS never showed the system dialog, so users had to discover
+Accessibility manually.
+
+**Fix**: `WorkspaceTidy.ensure_access(*, prompt=True)` calls
+`AXIsProcessTrustedWithOptions` with `kAXTrustedCheckOptionPrompt`. If macOS
+does not show the dialog (already denied), it opens the Accessibility pane in
+System Settings. The **foreground launcher** invokes this before
+`spawn_detached_watch` — a detached child often cannot surface the prompt.
+`install.sh` and `ctimeli permissions` run the same interactive setup; first
+watch launch waits for the user to toggle **Python** (``sys.executable``), not
+Terminal.app. Watch mode and one-shot mode also call it at startup when relevant.
+
+---
+
+### #44 — Calendar Allow dialog never appears for ``python -m ctimeli`` · Fixed
+
+EventKit's ``requestFullAccessToEventsWithCompletion_`` returned ``granted=False``
+immediately (TCC status stayed ``NotDetermined``) because the Python framework
+``Info.plist`` shipped without ``NSCalendarsFullAccessUsageDescription``. macOS
+cannot show the Allow/Don't Allow sheet without that key — opening Calendars in
+System Settings does not help (there is no ``+`` button; apps appear only after
+the native dialog).
+
+**Fix**: ``install.sh`` adds the usage description to the Python framework plist
+(one-time ``sudo``). ``ensure_calendar_dialog_ready()`` checks before requesting.
+Calendar setup uses the native dialog; Settings opens only when status is
+``Denied``.
+
+---
+
+### #45 — Python aborts ``RegisterApplication`` from Cursor terminal · Fixed
+
+``activate_for_system_prompt()`` called ``setActivationPolicy(Regular)``, which
+triggers ``RegisterApplication`` + menu-bar setup. That **SIGABRT**s when Python
+is spawned from Cursor's integrated terminal (``Responsible Process: Cursor``).
+
+**Fix**: all CLI AppKit bootstrap uses ``ActivationPolicyAccessory`` only
+(``appkit_init.ensure_appkit_initialized``). ``./run permissions`` from Cursor
+reopens the flow in **Terminal.app** via a ``.command`` script
+(``CTIMELI_PERMISSIONS_IN_TERMINAL=1`` prevents relaunch loops).
+
+---
+
+### #46 — Watch segfault after block-end teardown · Fixed
+
+Under ``AppHelper.runEventLoop``, ``SessionRunner._teardown()`` called
+``window.close()`` synchronously at the end of a tick with ``yield_loop=False``.
+PyObjC on Python 3.14 **SIGSEGV** (~exit 139) on the next event-loop turn even
+though the watch loop correctly returned to idle.
+
+**Fix**: one-shot mode (``yield_loop=True``) keeps synchronous ``close()``;
+watch mode defers teardown and uses ``orderOut`` only (no ``close()``) via
+``AppHelper.callLater(0, …)``. Calendar access is cached after the first denial
+so ``_update_menu_bar`` does not re-hit EventKit every frame.

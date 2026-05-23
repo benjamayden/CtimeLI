@@ -165,7 +165,7 @@ Parses a **clock time** into the next future occurrence.
    `{hour%12, hour%12 + 12}`, roll each to the future, return the **nearest**.
 
 ### `parse_quick_input(raw, now) -> datetime`
-The parser the CLI and watch stdin both use.
+The parser the CLI and menu bar Start both use for minute values.
 ```
 s = raw.strip()
 if s is empty:                       -> ValueError("Empty input")

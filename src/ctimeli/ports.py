@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from .domain.apps import AppSelector, RunningApp
 from .domain.calendar import CalendarEvent
@@ -22,8 +23,8 @@ from .domain.session import RenderFrame
 class ActivationPolicy(Enum):
     """How the process presents itself while a session runs."""
 
-    ACCESSORY = "accessory"  # no Dock icon — during a countdown
-    PROHIBITED = "prohibited"  # fully hidden — watcher idle
+    ACCESSORY = "accessory"  # no Dock icon — watch idle and during countdown
+    PROHIBITED = "prohibited"  # fully hidden — session teardown
     REGULAR = "regular"  # focusable — for the stop overlay
 
 
@@ -140,7 +141,12 @@ class AppControl(Protocol):
 class WorkspaceTidy(Protocol):
     """Hides other apps and minimizes the focused window after block-on-end."""
 
-    def tidy_focused(self, *, skip: frozenset[AppSelector]) -> None:
+    def ensure_access(self, *, prompt: bool = True) -> bool:
+        """Acquire Accessibility permission. Idempotent; may show the system dialog."""
+
+    def tidy_focused(
+        self, *, skip: frozenset[AppSelector], pump: bool = True
+    ) -> None:
         """Option+Cmd+H hide others, then Cmd+M minimize front unless skipped."""
 
 
@@ -178,6 +184,9 @@ class SignalListener(Protocol):
     def interrupted(self) -> bool:
         """True once SIGINT has fired (latched)."""
 
+    def clear(self) -> None:
+        """Reset after a session consumed SIGINT."""
+
     def restore(self) -> None: ...
 
 
@@ -203,3 +212,37 @@ class EnvSource(Protocol):
 
     def values(self) -> Mapping[str, str]:
         """Process environment merged over .env-file values."""
+
+
+@dataclass(frozen=True)
+class WatchMenuAction:
+    """User action from the watch-mode menu bar control."""
+
+    kind: Literal["start_minutes", "extend_minutes", "quit"]
+    minutes: float = 0.0
+
+
+@runtime_checkable
+class WatchMenuBar(Protocol):
+    """Menu bar status item for watch mode — start, extend, and quit."""
+
+    def show(self) -> None:
+        """Create the status item. Idempotent."""
+
+    def teardown(self) -> None:
+        """Remove the status item. Idempotent."""
+
+    def poll_actions(self) -> list[WatchMenuAction]:
+        """Actions since the last call. Never blocks."""
+
+    def set_status(self, *, label: str | None) -> None:
+        """Remaining-time label on the item, or None for icon only."""
+
+    def set_idle(self, idle: bool) -> None:
+        """True when no session is running (Start vs Add button)."""
+
+    def set_extend_enabled(self, enabled: bool) -> None:
+        """False when calendar/hard-stop trumps manual extend."""
+
+    def is_menu_open(self) -> bool:
+        """True while the status-item menu is on screen."""

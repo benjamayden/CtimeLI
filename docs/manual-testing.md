@@ -106,19 +106,22 @@ Wait for the stop overlay, then press **Ctrl+C** in the terminal tab.
 
 ---
 
-## 6. Watch mode — quick add
+## 6. Watch mode — menu bar
 
 ```sh
 ./run watch
 ```
 
-At the prompt, type `1` and press Enter.
+The terminal prints a status line and returns. Click the timer icon in the menu bar.
 
 **Watch for:**
-- [ ] A 1-minute countdown starts (stroke appears)
-- [ ] HUD shows `1m 0s` counting down
-- [ ] Type `2` while running — existing timer replaced by a 2-minute one
-- [ ] Type `q` — clean exit, terminal restored, no leftover overlays
+- [ ] Menu bar icon visible after launch; terminal prompt returns
+- [ ] Click icon → menu with **Start timer…** and **Quit watch mode**
+- [ ] **Start timer…** → enter `1` → OK → 1-minute countdown (stroke + HUD)
+- [ ] Icon title shows remaining time (e.g. `1m 0s`) while running
+- [ ] **Add** extends a pure manual session; **Add** disabled during green/orange calendar/hard-stop
+- [ ] Close the launch terminal — watch keeps running; icon still visible
+- [ ] **Quit watch mode** — icon disappears, process exits, no leftover overlays
 
 ---
 

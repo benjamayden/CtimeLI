@@ -65,15 +65,15 @@ class _StopModalController(AppKit.NSObject):
 
         def handle(event):
             if self.can_dismiss():
-                if event.type() == AppKit.NSLeftMouseDown:
+                if event.type() == AppKit.NSEventTypeLeftMouseDown:
                     self.dismiss()
                     return None
-                if event.type() == AppKit.NSKeyDown and event.keyCode() in (36, 53):
+                if event.type() == AppKit.NSEventTypeKeyDown and event.keyCode() in (36, 53):
                     self.dismiss()
                     return None
             return event
 
-        mask = AppKit.NSLeftMouseDownMask | AppKit.NSKeyDownMask
+        mask = AppKit.NSEventMaskLeftMouseDown | AppKit.NSEventMaskKeyDown
         self._monitor = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
             mask, handle
         )
@@ -201,6 +201,7 @@ class MacStopOverlay:
     def __init__(self) -> None:
         self._controller: _StopModalController | None = None
         self._windows: list[StopBlockWindow] = []
+        self._activation_pending = False
 
     def show(self, lines: list[str]) -> None:
         AppKit.NSCursor.hide()
@@ -211,38 +212,40 @@ class MacStopOverlay:
             )
             for screen in AppKit.NSScreen.screens()
         ]
-        # Order front first so the windows are visible during activation.
         for window in self._windows:
             window.orderFrontRegardless()
-        # activateIgnoringOtherApps_ is deprecated on macOS 14+ but is the
-        # only form that reliably steals focus from any frontmost app. The
-        # newer activate() form silently fails when we aren't already active.
         AppKit.NSApp.activateIgnoringOtherApps_(True)
-        # Give the run loop one cycle to process the activation event before
-        # trying to make the window key (makeKeyAndOrderFront_ requires the
-        # app to be active).
-        AppKit.NSRunLoop.currentRunLoop().runMode_beforeDate_(
-            AppKit.NSDefaultRunLoopMode,
-            AppKit.NSDate.dateWithTimeIntervalSinceNow_(0.05),
-        )
+        # Defer key-window + monitor setup to the next dismissed() poll so we
+        # never nest runMode:beforeDate: inside AppHelper.runEventLoop (watch).
+        self._activation_pending = True
+
+    def _finish_activation(self) -> None:
+        if not getattr(self, "_activation_pending", False) or not self._windows:
+            return
         for window in self._windows:
             window.makeKeyAndOrderFront_(None)
         if self._windows:
             self._windows[0].makeFirstResponder_(self._windows[0].contentView())
-        self._controller.install_input_monitor()
+        if self._controller is not None:
+            self._controller.install_input_monitor()
+        self._activation_pending = False
 
     def dismissed(self) -> bool:
+        if getattr(self, "_activation_pending", False):
+            self._finish_activation()
         if self._controller is not None:
             self._controller.poll_button_state()
         return self._controller is not None and bool(self._controller.dismissed)
 
-    def hide(self) -> None:
+    def hide(self, *, close: bool = True) -> None:
         AppKit.NSCursor.unhide()
+        self._activation_pending = False
         if self._controller is not None:
             self._controller.remove_input_monitor()
         for window in self._windows:
             window.setIgnoresMouseEvents_(True)
             window.orderOut_(None)
-            window.close()
+            if close:
+                window.close()
         self._windows.clear()
         self._controller = None

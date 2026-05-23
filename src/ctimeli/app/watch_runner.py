@@ -1,6 +1,6 @@
 """WatchRunner — the long-lived watch-mode loop.
 
-Listens for quick-add input and calendar events; spawns and retargets a
+Listens for menu bar actions and calendar events; spawns and retargets a
 SessionRunner. Like SessionRunner it is written against ports and a session
 factory, so it is testable with fakes.
 """
@@ -14,14 +14,16 @@ from typing import Protocol
 from ctimeli import ports
 from ctimeli.domain.calendar import CalendarEvent, calendar_block_target, hard_stop_target
 from ctimeli.domain.config import AppConfig
-from ctimeli.domain.math import format_duration
-from ctimeli.domain.session import FRAME_INTERVAL, SessionKind
+from ctimeli.domain.math import format_duration, format_duration_compact
+from ctimeli.domain.session import FRAME_INTERVAL, SessionKind, SessionState
 from ctimeli.domain.timespec import parse_quick_input
 
 from .session_runner import SessionRunner
 
 # Below this difference a calendar target is "the same" — do not retarget.
 _RETARGET_EPSILON_SECONDS = 1.0
+# Longer pump while idle so status-bar menus and alerts get event time.
+_IDLE_PUMP_INTERVAL = 0.1
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,7 @@ class SessionFactory(Protocol):
 
 
 class WatchRunner:
-    """Drives watch mode: stdin quick-add + calendar auto-start / snap."""
+    """Drives watch mode: menu bar quick-add + calendar auto-start / snap."""
 
     def __init__(
         self,
@@ -65,7 +67,9 @@ class WatchRunner:
         signals: ports.SignalListener,
         scheduler: ports.FrameScheduler,
         app_control: ports.AppControl,
+        menu_bar: ports.WatchMenuBar,
         session_factory: SessionFactory,
+        workspace_tidy: ports.WorkspaceTidy | None = None,
     ) -> None:
         self.config = config
         self.clock = clock
@@ -75,39 +79,71 @@ class WatchRunner:
         self.signals = signals
         self.scheduler = scheduler
         self.app_control = app_control
+        self.menu_bar = menu_bar
         self.session_factory = session_factory
+        self._workspace_tidy = workspace_tidy
         self._current: SessionRunner | None = None
         self._quit = False
         self._last_cal_poll = 0.0
         # Maps fired event_id → event_start so stale entries can be evicted once
         # the event's start time passes (edge-cases #29).
         self._finished_events: dict[str, dt.datetime] = {}
+        self._calendar_trumps_manual = False
+        self._calendar_available = True
 
     def run(self) -> int:
         """Run the watch loop until the user quits. Returns an exit code."""
-        self.signals.install()
-        self._go_idle()
+        self._startup()
         try:
             self._announce()
-            while not self._quit:
-                if self.signals.interrupted():
-                    break
-                self._poll_input()
-                self._poll_calendar()
-                self._pump_current()
+            while self._tick_once():
+                pass
         finally:
             self._shutdown()
         return 0
 
+    def _startup(self) -> None:
+        self.signals.install()
+        self.menu_bar.show()
+        self._go_idle()
+
+    def _tick_once(self, *, pump_idle: bool = True, yield_loop: bool = True) -> bool:
+        if self._quit:
+            return False
+        if self._current is None and self.signals.interrupted():
+            return False
+        self._poll_input()
+        self._poll_menu()
+        self._poll_calendar()
+        self._pump_current(pump_idle=pump_idle, yield_loop=yield_loop)
+        if not self.menu_bar.is_menu_open():
+            self._update_menu_bar()
+        return True
+
+    def tick_interval(self) -> float:
+        if self._current is None:
+            return _IDLE_PUMP_INTERVAL
+        if self._current.session.state is SessionState.BLOCKING:
+            return 0.05
+        return FRAME_INTERVAL
+
     # -- startup / shutdown --------------------------------------------------
 
     def _announce(self) -> None:
+        self._calendar_available = True
         if self.config.calendar_enabled:
-            self.calendar.ensure_access()
-        if not self._start_from_nearest():
-            if self.config.calendar_enabled:
-                self.logger.info("Calendar: no accepted event in the next window.")
-        self.logger.info("Watcher ready — enter 15, 14:00, or q to quit.")
+            self._calendar_available = self.calendar.ensure_access()
+            self._last_cal_poll = self.clock.monotonic()
+        if self.config.block_on_end and self._workspace_tidy is not None:
+            self._workspace_tidy.ensure_access()
+        if self._calendar_available and not self._start_from_nearest():
+            self.logger.info("Calendar: no accepted event in the next window.")
+        elif self.config.calendar_enabled and not self._calendar_available:
+            self.logger.info("Calendar access not granted — auto-start disabled.")
+        self._refresh_calendar_trump()
+        self.logger.info(
+            "Watcher ready — click the timer icon in the menu bar to start timers or quit."
+        )
         if self.config.block_on_end:
             self.logger.info("Block on end: dismiss the stop overlay to tidy windows.")
 
@@ -117,20 +153,22 @@ class WatchRunner:
             while self._current.pump():
                 pass
             self._current = None
+        self.menu_bar.teardown()
         self.input_source.close()
         self.signals.restore()
         self.scheduler.stop()
 
     def _go_idle(self) -> None:
-        self.app_control.set_activation_policy(ports.ActivationPolicy.PROHIBITED)
+        self.app_control.set_activation_policy(ports.ActivationPolicy.ACCESSORY)
 
     # -- per-loop steps ------------------------------------------------------
 
-    def _pump_current(self) -> None:
+    def _pump_current(self, *, pump_idle: bool = True, yield_loop: bool = True) -> None:
         if self._current is None:
-            self.scheduler.pump(FRAME_INTERVAL)
+            if pump_idle:
+                self.scheduler.pump(_IDLE_PUMP_INTERVAL)
             return
-        if self._current.pump():
+        if self._current.pump(yield_loop=yield_loop):
             return
         session = self._current.session
         if (
@@ -142,13 +180,49 @@ class WatchRunner:
             self._finished_events[session.event_id] = session.event_start or session.target
         self._current = None
         self._go_idle()
+        if self.signals.interrupted():
+            # Session consumed SIGINT for block-end tidy — do not quit watch.
+            self.signals.clear()
 
     def _poll_input(self) -> None:
-        if self.input_source.closed():
-            self._quit = True
-            return
         for line in self.input_source.poll_lines():
             self._handle_line(line)
+
+    def _poll_menu(self) -> None:
+        for action in self.menu_bar.poll_actions():
+            if action.kind == "quit":
+                self._quit = True
+            elif action.kind == "start_minutes":
+                target = self.clock.now() + dt.timedelta(minutes=action.minutes)
+                self._try_start_manual(target)
+            elif action.kind == "extend_minutes":
+                self._try_extend_manual(action.minutes)
+
+    def _update_menu_bar(self) -> None:
+        if self._current is None:
+            self.menu_bar.set_status(label=None)
+            self.menu_bar.set_idle(True)
+            self.menu_bar.set_extend_enabled(True)
+            return
+        session = self._current.session
+        remaining = max(0.0, (session.target - self.clock.now()).total_seconds())
+        self.menu_bar.set_status(label=format_duration_compact(remaining))
+        self.menu_bar.set_idle(False)
+        extend_ok = (
+            session.kind is SessionKind.MANUAL and not self._calendar_trumps_manual
+        )
+        self.menu_bar.set_extend_enabled(extend_ok)
+
+    def _refresh_calendar_trump(self) -> None:
+        """Update extend/menu state from calendar poll — not every frame."""
+        if not self.config.calendar_enabled and not self.config.hard_stop_enabled:
+            self._calendar_trumps_manual = False
+            return
+        if self.config.calendar_enabled and not self._calendar_available:
+            if not self.config.hard_stop_enabled:
+                self._calendar_trumps_manual = False
+                return
+        self._calendar_trumps_manual = self._nearest_candidate() is not None
 
     def _handle_line(self, line: str) -> None:
         text = line.strip()
@@ -165,9 +239,27 @@ class WatchRunner:
         if (target - self.clock.now()).total_seconds() <= 0:
             self.logger.error("Target time is already in the past.")
             return
+        self._try_start_manual(target)
+
+    def _try_start_manual(self, target: dt.datetime) -> None:
         self._start_session(target, kind=SessionKind.MANUAL)
-        # A manual timer still snaps to a sooner watch candidate if there is one.
-        self._retarget_current_to_nearest()
+        if self._current is not None:
+            self._current.pump()
+        self._sync_to_nearest_candidate(from_manual=True)
+
+    def _try_extend_manual(self, minutes: float) -> None:
+        if self._current is None:
+            return
+        session = self._current.session
+        if session.kind is not SessionKind.MANUAL:
+            return
+        self._refresh_calendar_trump()
+        if self._calendar_trumps_manual:
+            self.logger.info("Calendar takes priority — extend ignored.")
+            return
+        new_target = session.target + dt.timedelta(minutes=minutes)
+        if session.retarget(new_target, self.clock.now()):
+            self.logger.info(f"Extended +{minutes:g}m → {new_target:%H:%M:%S}")
 
     def _evict_stale_finished(self) -> None:
         now = self.clock.now()
@@ -183,10 +275,11 @@ class WatchRunner:
             return
         self._last_cal_poll = self.clock.monotonic()
         self._evict_stale_finished()
+        self._refresh_calendar_trump()
         if self._current is None:
             self._start_from_nearest()
         else:
-            self._retarget_current_to_nearest()
+            self._sync_to_nearest_candidate(from_manual=False)
 
     # -- session control -----------------------------------------------------
 
@@ -237,8 +330,8 @@ class WatchRunner:
         )
         return True
 
-    def _retarget_current_to_nearest(self) -> None:
-        """Snap the live session to a sooner watch candidate (edge-cases #14)."""
+    def _sync_to_nearest_candidate(self, *, from_manual: bool) -> None:
+        """Align the live session with calendar/hard-stop candidates."""
         if self._current is None:
             return
         candidate = self._nearest_candidate()
@@ -247,6 +340,13 @@ class WatchRunner:
         session = self._current.session
         if abs((session.target - candidate.target).total_seconds()) <= _RETARGET_EPSILON_SECONDS:
             return
+        if session.kind is SessionKind.MANUAL:
+            should_sync = True
+        else:
+            should_sync = candidate.target < session.target
+        if not should_sync:
+            return
+        was_manual = session.kind is SessionKind.MANUAL
         if session.retarget(
             candidate.target,
             self.clock.now(),
@@ -257,18 +357,30 @@ class WatchRunner:
             call_url=candidate.call_url,
             room=candidate.room,
         ):
-            if candidate.kind is SessionKind.CALENDAR and candidate.event_title:
+            self._log_candidate_sync(candidate, priority=from_manual and was_manual)
+
+    def _log_candidate_sync(self, candidate: _WatchCandidate, *, priority: bool) -> None:
+        if candidate.kind is SessionKind.CALENDAR and candidate.event_title:
+            if priority:
+                self.logger.info(
+                    f"Calendar takes priority → {candidate.target:%H:%M} "
+                    f"({candidate.event_title})"
+                )
+            else:
                 self.logger.info(
                     f"Calendar → {candidate.target:%H:%M} ({candidate.event_title})"
                 )
-            elif candidate.kind is SessionKind.HARD_STOP:
+        elif candidate.kind is SessionKind.HARD_STOP:
+            if priority:
+                self.logger.info(f"Hard stop takes priority → {candidate.target:%H:%M}")
+            else:
                 self.logger.info(f"Hard stop → {candidate.target:%H:%M}")
 
     def _nearest_candidate(self) -> _WatchCandidate | None:
         now = self.clock.now()
         candidates: list[_WatchCandidate] = []
 
-        if self.config.calendar_enabled:
+        if self.config.calendar_enabled and self._calendar_available:
             event = self._pending_event()
             if event is not None:
                 block_at = calendar_block_target(event.start, self.config, now)

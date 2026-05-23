@@ -150,7 +150,7 @@ C4Component
 
   Container_Boundary(appc, "Application") {
     Component(session, "SessionRunner", "app/session_runner.py", "Drives one countdown: frame loop, render, finish, block, cleanup")
-    Component(watch, "WatchRunner", "app/watch_runner.py", "Long-lived: stdin + calendar poll; spawns/retargets a SessionRunner")
+    Component(watch, "WatchRunner", "app/watch_runner.py", "Long-lived: menu bar + calendar poll; spawns/retargets a SessionRunner")
     Component(machine, "Session", "domain/session.py", "Explicit state machine + RenderFrame producer")
     Component(sched, "Scheduler glue", "uses FrameScheduler port", "~60 Hz tick source")
   }
@@ -209,26 +209,31 @@ sequenceDiagram
 sequenceDiagram
   participant U as User
   participant WR as WatchRunner
-  participant IN as InputSource
+  participant MB as WatchMenuBar
   participant CAL as CalendarSource
   participant S as SessionRunner
 
   U->>WR: ./run watch
+  WR->>WR: spawn detached subprocess
+  WR->>MB: show()
   WR->>CAL: ensure_access()
-  loop until quit
-    WR->>IN: poll lines
-    opt user typed "20"
-      WR->>S: replace running session, target now+20m
+  loop until Quit
+    WR->>MB: poll_actions
+    opt Start or Add
+      WR->>S: start or extend manual session
+      WR->>WR: sync calendar/hard_stop trump
     end
     WR->>CAL: nearest_event_within() (throttled)
-    opt sooner event appears
-      WR->>S: retarget(block_at, calendar metadata)
+    opt sooner candidate on scheduled session
+      WR->>S: retarget(block_at, metadata)
     end
     WR->>S: pump one frame
+    WR->>MB: set_status / set_extend_enabled
     opt session ended
       WR->>WR: drop session, return to idle
     end
   end
+  WR->>MB: teardown
 ```
 
 ## 5. The session state machine
@@ -315,6 +320,8 @@ These are load-bearing. A change that violates one is a bug even if tests pass.
           logger.py             # StderrLogger
           dotenv.py             # dotenv parser (returns a mapping; no env mutation)
           stdin_source.py       # non-blocking line reader
+          null_input.py         # detached watch (no stdin)
+          detach.py             # spawn detached watch subprocess
           signals.py            # SIGINT handler
           wifi.py               # SystemWifi (SSID for call-link policy)
         macos/
@@ -328,6 +335,7 @@ These are load-bearing. A change that violates one is a bug even if tests pass.
           keyboard.py           # CGEvent shortcut helper (used by workspace_tidy)
           calendar.py           # EventKit CalendarSource
           url_opener.py         # opens meeting URLs in default browser
+          watch_menu_bar.py     # menu bar status item (watch mode)
   tests/                      # pytest — domain exhaustive, app via fakes
   docs/                       # this folder
 ```
