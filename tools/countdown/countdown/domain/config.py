@@ -58,17 +58,11 @@ class AppConfig:
     hard_stop_stroke_b: float = 0.15
 
     @classmethod
-    def from_mapping(
-        cls,
-        env: Mapping[str, str],
-        manifest: dict[int, str] | None = None,
-    ) -> tuple[AppConfig, list[str]]:
+    def from_mapping(cls, env: Mapping[str, str]) -> tuple[AppConfig, list[str]]:
         """Build from a string mapping (merged process env over .env values).
 
-        Returns (config, warnings). The manifest argument is accepted for
-        backward compatibility but is no longer used.
+        Returns (config, warnings). Warnings is always empty today.
         """
-        _ = manifest
         cfg = cls(
             stroke_width=_as_float(env, "STROKE_WIDTH", 6.0),
             red_zone_fraction=_as_float(env, "RED_ZONE_FRACTION", 0.05),

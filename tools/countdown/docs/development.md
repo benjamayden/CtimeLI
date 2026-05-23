@@ -21,12 +21,10 @@ exercises everything except the macOS adapters.
 Run the app via the bootstrap scripts (they create the venv on first use):
 
 ```sh
-./run 15            ./run watch            ./shake --app-timing
+./run 15            ./run watch
 ```
 
-Tune wiggle feel in `.env` (`SHAKE_*`); use `./shake --app-timing` to preview
-before a long watch session. See [`configuration.md`](configuration.md) §"Window
-wiggle".
+Tune blur and pulse feel in `.env` (`PULSE_*`); see [`configuration.md`](configuration.md).
 
 ---
 
@@ -42,9 +40,8 @@ expected outputs.
 - `test_math.py` — `smoothstep` endpoints/midpoint; `lerp` frame-rate
   independence; `format_duration` across h/m/s and negatives.
 - `test_curves.py` — `pulse_opacity` (before/at/after window; ramp clamp),
-  `pulse_spread` (linear vs `ramp_power=3`), `shake_intensity` (the 3 s window).
+  `pulse_spread` (linear vs `ramp_power=3`), `blur_intensity` (glow window).
 - `test_colors.py` — `stroke_color_for_fraction` above/at/below `red_zone`.
-- `test_shake.py` — `ShakeMotion`: zero rest, amplitude bound, `reset`.
 - `test_timespec.py` — **every row of the parsing table in
   [`domain.md`](domain.md) §4**, including the ambiguous-hour and error cases.
 - `test_calendar.py` — `calendar_block_target`, `hard_stop_target`, `is_work_wifi`.
@@ -62,8 +59,8 @@ port, see [`ports.md`](ports.md) summary table). A `SessionRunner` test:
 
 1. Build `SessionRunner` with `FakeClock`, `FakeScheduler`, `FakeOverlay`, …
 2. Advance `FakeClock`, hand-drive frames via `FakeScheduler`.
-3. Assert on what the fakes recorded — `FakeOverlay.frames`, `FakeLogger.lines`,
-   `FakeWorkspaceTidy.tidy_calls`.
+3. Assert on what the fakes recorded — `FakeOverlay.frames`,
+   `RecordingLogger.info_lines`, `FakeWorkspaceTidy.tidy_calls`.
 
 This catches orchestration bugs (does zero trigger the stop overlay? does
 `CLEANUP` run the plan exactly once?) with **no Mac and no display**.
@@ -76,7 +73,7 @@ to `adapters/macos/`:
 
 - [ ] `./run 1` — stroke draws on every display; shrinks; turns red near zero.
 - [ ] Edge glow blooms in the last ~2 min and deepens.
-- [ ] Last 3 s: the frontmost window wiggles, then snaps back exactly.
+- [ ] Screen blur ramps in the last ~2 min; desktop unreadable at zero.
 - [ ] `./run 1 --block-on-end` — stop overlay covers all displays; ignores
       input for ~0.6 s; click/Return/Escape dismisses; windows tidy per `.env`.
 - [ ] `./run watch` — type `1`, get a timer; type `q`, clean exit; **the
@@ -127,21 +124,21 @@ old code or old notes.
 |--------------|--------|----------|
 | `countdown.py` | `_smoothstep`, `_lerp`, `format_duration` | `domain/math.py` |
 | `config.py` | `_smoothstep` (dup), `pulse_opacity`, `pulse_spread` | `domain/math.py`, `domain/curves.py` |
-| `config.py` | `shake_intensity` | `domain/curves.py` |
+| `config.py` | `pulse_opacity`, `pulse_spread`, `blur_intensity` | `domain/curves.py` |
 | `config.py` | `pulse_intensity` | *deleted (#8)* |
 | `countdown.py` | `STROKE_BLUE`, `STROKE_RED`, `_stroke_color_for_fraction` | `domain/colors.py` |
 | `input_parse.py` | `parse_target_time`, `parse_quick_input` | `domain/timespec.py` |
 | `calendar_monitor.py` | `CalendarEvent` | `domain/calendar.py` |
 | `countdown.py` | `calendar_block_target`, `calendar_stroke_base` | `domain/calendar.py` |
-| `countdown.py` | `_action_for_process`, alias tables, `_expand_block_end_names` | `domain/blockend.py` |
-| `countdown.py` | `apply_block_end_actions` (planning half) | `domain/blockend.py::plan_block_end` |
-| `countdown.py` | `apply_block_end_actions` (execution) | `adapters/macos/workspace_tidy.py` |
+| `countdown.py` | `apply_block_end_actions` (AppleScript per-app tidy) | `adapters/macos/workspace_tidy.py` *(keyboard shortcuts, #36)* |
+| `countdown.py` | `domain/blockend.py` planning | *deleted — no domain block-end plan* |
 | `config.py` | `AppConfig`, `merge_cli` → `merge`, env parsers | `domain/config.py` *(pure value object)* |
 | `config.py` | `load_dotenv` | `adapters/system/dotenv.py` *(no env mutation, #5)* |
 | `countdown.py` | `CountdownApp` (lifecycle/state) | `domain/session.py` + `app/session_runner.py` |
 | `countdown.py` | `Watcher` | `app/watch_runner.py` |
-| `countdown.py` | `FocusShaker` | `adapters/macos/shaker.py` |
+| `countdown.py` | `FocusShaker` / window wiggle | *deleted — replaced by `ScreenBlur` + `blur_intensity`* |
 | `countdown.py` | `CountdownWindow`, `CountdownView`, `_draw_*` | `adapters/macos/overlay.py` |
+| `countdown.py` | screen blur at end | `adapters/macos/blur.py` |
 | `countdown.py` | `CountdownHUDWindow`, `FinishControl` | `adapters/macos/hud.py` |
 | `countdown.py` | `StopBlockWindow/View`, `_StopModalController` | `adapters/macos/stop_overlay.py` |
 | `countdown.py` | `_pump_run_loop` | `adapters/macos/runloop.py` (`_TimerBridge` deleted, #11) |
@@ -149,7 +146,7 @@ old code or old notes.
 | `calendar_monitor.py` | `CalendarMonitor` | `adapters/macos/calendar.py` |
 | `countdown.py` | `_enable_stdin_nonblocking`, `_read_stdin_chunk` | `adapters/system/stdin_source.py` *(+restore, #18)* |
 | `countdown.py` | `main`, `_main_countdown`, `_main_watch`, arg parsing | `cli.py` |
-| `shake_test.py` | `ShakeTester` | *deleted; file renamed `shake_tune.py`, now drives `adapters/macos/shaker.py` + `domain/shake.py` (#10)* |
+| `apps.manifest` block-end indices | per-app hide lists | *removed — `run apps` is debug-only* |
 
 ---
 
@@ -224,8 +221,9 @@ flag if user-facing; document it in [`configuration.md`](configuration.md) and
 `.env.example`. Defaults make old `.env` files keep working.
 
 **A new visual** — add a field to `RenderFrame`; compute it in `Session.tick`
-from a new `domain/curves.py` function (unit-tested); render it in
-`adapters/macos/overlay.py`. The overlay never gains logic — only drawing.
+from a new `domain/curves.py` function (unit-tested); render it in the
+relevant macOS adapter (`overlay.py` for stroke/glow, `blur.py` for blur).
+The overlay never gains logic — only drawing.
 
 **A new session kind** — add a `SessionKind` value; give it a stroke colour;
 attach any metadata to the session. The state machine and frame loop do **not**

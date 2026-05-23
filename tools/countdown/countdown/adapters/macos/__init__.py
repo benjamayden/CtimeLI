@@ -1,4 +1,4 @@
-"""macOS adapters — PyObjC / EventKit / Accessibility / AppleScript.
+"""macOS adapters — PyObjC / EventKit / Accessibility / CGEvent.
 
 Imported only by countdown.composition. These cannot run on CI (no Mac, no
 display); they are verified by the manual checklist in docs/development.md.

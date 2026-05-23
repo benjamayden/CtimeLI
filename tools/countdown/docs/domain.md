@@ -25,8 +25,7 @@ zero first-derivative at both ends (no visible "snap").
 > [`edge-cases.md`](edge-cases.md) #2.
 
 ### `lerp(current, target, dt, rate) -> float`
-Frame-rate-independent exponential approach. Used for stroke smoothing and
-wiggle motion.
+Frame-rate-independent exponential approach. Used for stroke smoothing.
 ```
 alpha = 1 - exp(-rate * dt)
 return current + (target - current) * alpha
@@ -36,8 +35,8 @@ the *same convergence per wall-clock second* regardless of frame rate, so the
 animation looks identical at 30 Hz and 120 Hz. `rate` is "per second"; larger =
 snappier.
 
-> **Smell fixed.** `_lerp` was duplicated in `countdown.py` and `shake_test.py`.
-> One definition now; the shake harness imports it.
+> **Smell fixed.** `_lerp` was duplicated in `countdown.py` and a shake test
+> harness. One definition now in `domain/math.py`.
 
 ### `format_duration(seconds) -> str`
 ```
@@ -58,7 +57,7 @@ Examples: `3725 → "1h 2m 5s"`, `64 → "1m 4s"`, `9 → "9s"`, `-5 → "0s"`.
 ## 2. Animation curves — `domain/curves.py`
 
 All three take `remaining` (seconds left) and `cfg`, and return a number the
-overlay renders directly. They are independent — opacity, spread and wiggle do
+overlay renders directly. They are independent — opacity, spread, and blur do
 not reference each other.
 
 ### The pulse window
@@ -359,6 +358,6 @@ So the boundary stays sharp:
   `NSBezierPath` fills is the overlay adapter's job.
 - **The clock.** `tick` receives `now`. The domain never calls `datetime.now()`.
 - **The frame timer.** ~60 Hz ticking is a `FrameScheduler` port.
-- **Process lists.** The domain *plans* block-end from name lists; *getting*
-  the lists and *executing* actions is an adapter.
+- **Process lists.** Block-end tidy is adapter-only (`WorkspaceTidy`); the domain
+  never plans per-app hide/minimize lists.
 - **Printing.** User-facing text goes through the `Logger` port.

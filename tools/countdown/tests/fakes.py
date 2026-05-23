@@ -142,12 +142,10 @@ class FakeAppControl:
         *,
         frontmost: int | None = None,
         running: list[RunningApp] | None = None,
-        foreground: list[RunningApp] | None = None,
         apps_by_pid: dict[int, RunningApp] | None = None,
     ) -> None:
         self._frontmost = frontmost
         self._running = running or []
-        self._foreground = foreground or []
         self._apps_by_pid = apps_by_pid or {}
         self.activated_pids: list[int] = []
         self.policies: list[ports.ActivationPolicy] = []
@@ -164,9 +162,6 @@ class FakeAppControl:
 
     def running_apps(self) -> list[RunningApp]:
         return list(self._running)
-
-    def foreground_apps(self) -> list[RunningApp]:
-        return list(self._foreground)
 
     def set_activation_policy(self, policy: ports.ActivationPolicy) -> None:
         self.policies.append(policy)

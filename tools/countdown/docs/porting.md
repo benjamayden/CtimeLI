@@ -66,7 +66,8 @@ calls inside it — `now` is a parameter, exactly as in Python.
 trait Clock           { fn now(&self) -> DateTime<Local>; fn monotonic(&self) -> f64; }
 trait Logger          { fn info(&self, m: &str); fn warn(&self, m: &str); fn error(&self, m: &str); }
 trait CountdownOverlay{ fn show(&mut self); fn render(&mut self, f: &RenderFrame); /* … */ }
-trait WindowShaker    { fn apply(&mut self, dx: f64, dy: f64) -> bool; fn restore(&mut self); }
+trait ScreenBlur       { fn show(&mut self); fn set_intensity(&mut self, amount: f64); /* … */ }
+trait WorkspaceTidy    { fn tidy_focused(&mut self, skip: &[AppSelector]); }
 // … one trait per port in ports.md
 ```
 
@@ -81,10 +82,12 @@ implementing the same traits — Liskov holds by construction.
 | `Logger` | stderr writer | `log` + `env_logger`, or Tauri's logging plugin. |
 | `FrameScheduler` | `NSTimer` on the run loop | Tauri's event loop + a `~16 ms` timer, or `requestAnimationFrame` if the overlay is a webview. |
 | `CountdownOverlay` | borderless click-through `NSWindow` | A Tauri window: `transparent: true`, `decorations: false`, `always_on_top: true`, `setIgnoreCursorEvents(true)` for click-through, `skipTaskbar`. Draw the stroke/glow on a `<canvas>` in the webview, **or** an `objc2` `NSWindow` for a non-webview overlay. |
+| `ScreenBlur` | `NSVisualEffectView` per display | Same stack as overlay — frosted-glass layer above stroke, below HUD. Tauri: backdrop-filter on a fullscreen transparent window, or `objc2` `NSVisualEffectView`. |
 | `StopOverlay` | full-screen modal `NSWindow` above screen-saver level | A fullscreen, focused Tauri window; set its level above the screen saver via `objc2` (`NSScreenSaverWindowLevel + 1`) since Tauri has no API for that. |
-| `WindowShaker` | Accessibility AX API | The **same Accessibility C API** via the `accessibility` crate or raw `objc2` — `AXUIElementCreateApplication`, `kAXPositionAttribute`. The logic is identical; only the FFI binding changes. |
 | `AppControl` | `NSWorkspace` / `NSApp` | `objc2-app-kit`: `NSWorkspace::sharedWorkspace`, `runningApplications`, activation policy. |
-| `BlockEndExecutor` / AppleScript tidy | `WorkspaceTidy` | `CGEvent` keyboard synthesis (Option+⌘+H, ⌘+M) + `NSRunningApplication.unhide` for watch-mode skip. |
+| `WorkspaceTidy` | `CGEvent` keyboard synthesis | Option+⌘+H (Hide Others), ⌘+M (Minimize) via `CGEvent`; `NSRunningApplication.unhide` for watch-mode skip. |
+| `UrlOpener` | `NSWorkspace.openURL_` | Same via `objc2-app-kit`. |
+| `WifiSource` | `networksetup` / CoreWLAN | Platform-specific SSID query; domain only sees `Option<String>`. |
 | `CalendarSource` | EventKit via PyObjC | EventKit via `objc2-event-kit`. The async permission request maps to a channel the `ensure_access` call blocks on. |
 | `InputSource` | non-blocking stdin (`fcntl`) | If watch mode keeps a terminal: a `std::thread` reading stdin into an `mpsc` channel (cleaner than `O_NONBLOCK` — and sidesteps bug #18 entirely). If watch mode becomes a GUI, this port disappears. |
 | `SignalListener` | `signal.signal` | The `ctrlc` crate, or `tokio::signal`. |
@@ -130,9 +133,8 @@ These are *behaviours*, not Python bugs — re-create the guards in any language
   input lockout, or an in-flight keystroke dismisses it instantly.
 - **#8 retarget never shrinks `total_seconds`** — the stroke jumps backwards
   otherwise. This is in [`domain.md`](domain.md) §7 "Retarget".
-- **Window-shaker restore** — always capture the original position and restore
-  it; a crash mid-wiggle must not leave the user's window displaced. Consider a
-  panic hook / `Drop` impl that calls `restore()`.
+- **Blur at zero with block-on-end** — blur stays at full strength under the
+  stop overlay until dismiss; do not hide it early.
 - **#28 ambiguous hours** — keep "nearest occurrence" parsing; it is by design.
 
 Pitfalls that **do not** travel (Python/PyObjC-specific — feel free to drop the

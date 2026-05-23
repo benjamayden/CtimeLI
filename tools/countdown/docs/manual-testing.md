@@ -173,10 +173,13 @@ Restore permission afterwards.
 
 ---
 
-## 10. App manifest (`./run apps`)
+## 10. App manifest (`./run apps`) — debug only
 
-Run after any change to `workspace_tidy.py`, `app_control.py`, or `cli.py apps`.
-Budget **1 minute**.
+The manifest is **not** loaded at startup; block-end tidy no longer uses per-app
+indices. This command is a debug helper to list running GUI apps and write
+`apps.manifest` for reference.
+
+Run after any change to `app_control.py` or `cli.py apps`. Budget **1 minute**.
 
 Open two or three regular GUI apps (e.g. Safari, Notes, TextEdit) **before**
 running:

@@ -7,7 +7,6 @@ See docs/ports.md and edge-cases.md "Unverified surface".
 from __future__ import annotations
 
 import AppKit
-import Quartz
 
 from countdown import ports
 from countdown.domain.apps import RunningApp
@@ -74,42 +73,6 @@ class MacAppControl:
                 seen_bundle_ids.add(bundle_id)
             seen_names.add(display_name)
             apps.append(RunningApp(bundle_id=bundle_id, display_name=display_name))
-        return apps
-
-    def foreground_apps(self) -> list[RunningApp]:
-        """Apps that have windows currently visible on screen (via CGWindowList).
-
-        Uses the window server directly — no AppleScript, no Automation permission.
-        Minimized windows are excluded because they are in the Dock, not on screen.
-        kCGWindowListExcludeDesktopElements drops the Finder desktop/wallpaper
-        layer so Finder only appears when it has an actual folder window open.
-        """
-        window_list = Quartz.CGWindowListCopyWindowInfo(
-            Quartz.kCGWindowListOptionOnScreenOnly
-            | Quartz.kCGWindowListExcludeDesktopElements,
-            Quartz.kCGNullWindowID,
-        )
-        pids_with_windows: set[int] = set()
-        if window_list:
-            for win in window_list:
-                pid = win.get("kCGWindowOwnerPID")
-                if pid is not None:
-                    pids_with_windows.add(int(pid))
-
-        workspace = AppKit.NSWorkspace.sharedWorkspace()
-        apps: list[RunningApp] = []
-        seen_pids: set[int] = set()
-        for app in workspace.runningApplications():
-            pid = int(app.processIdentifier())
-            if pid not in pids_with_windows or pid in seen_pids:
-                continue
-            if app.activationPolicy() != AppKit.NSApplicationActivationPolicyRegular:
-                continue
-            seen_pids.add(pid)
-            bundle_id = app.bundleIdentifier() or None
-            display_name = app.localizedName() or ""
-            if display_name:
-                apps.append(RunningApp(bundle_id=bundle_id, display_name=display_name, is_foreground=True))
         return apps
 
     def set_activation_policy(self, policy: ports.ActivationPolicy) -> None:

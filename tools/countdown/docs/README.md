@@ -2,7 +2,7 @@
 
 A macOS screen-edge countdown timer for time-blind / ADHD work. It draws a
 shrinking stroke around every display, glows the screen edges as zero
-approaches, physically wiggles the frontmost window in the final seconds, and
+approaches, progressively blurs the desktop in the final stretch, and
 can hard-block the screen at zero and tidy your windows away.
 
 This folder is the **blueprint**. It is written to be *framework-agnostic*: it
@@ -48,7 +48,7 @@ monolith this refactor replaced.
   docs, the code is wrong (or the docs need a PR — keep them in lockstep).
 - **Python implementation**: refactored from a single 1864-line file into the
   layered package described here. Pure domain logic is unit-tested and verified
-  on Linux. macOS adapters (PyObjC / EventKit / Accessibility / AppleScript)
+  on Linux. macOS adapters (PyObjC / EventKit / Accessibility / CGEvent)
   are **written but not machine-verified** — see
   [`edge-cases.md`](edge-cases.md) §"Unverified surface".
 
@@ -56,7 +56,7 @@ monolith this refactor replaced.
 
 Build five layers. `domain/` is pure functions and a state machine — port it
 verbatim, it has no platform calls. `ports.py` is interfaces — one per external
-concern (clock, logger, overlay, shaker, calendar, …). `app/` orchestrates
+concern (clock, logger, overlay, blur, calendar, …). `app/` orchestrates
 domain + ports and is the heart of the program. `adapters/` implements ports
 against the host OS. `composition.py` + `cli.py` wire it together. Test the
 domain exhaustively and the app with fake adapters; the platform adapters are

@@ -181,13 +181,14 @@ tool: you almost always mean the *next* one. Use `am`/`pm` or 24-hour form to be
 explicit. Documented, deliberately not "fixed".
 
 ### Unverified surface
-The macOS adapters — `overlay.py`, `hud.py`, `stop_overlay.py`, `shaker.py`,
-`app_control.py`, `workspace_tidy.py`, `calendar.py`, `runloop.py` — call
-PyObjC / EventKit / Accessibility / AppleScript and **cannot be exercised on
-CI** (no Mac, no display). They are ported carefully and structurally
-1:1 with the original, but treat them as **unverified until run on a Mac**. The
-pure domain *is* verified — that is the whole point of the split. First Mac
-run: follow [`development.md`](development.md) §"Manual macOS checklist".
+The macOS adapters — `overlay.py`, `hud.py`, `blur.py`, `stop_overlay.py`,
+`app_control.py`, `workspace_tidy.py`, `keyboard.py`, `url_opener.py`,
+`calendar.py`, `runloop.py` — call PyObjC / EventKit / Accessibility / CGEvent
+and **cannot be exercised on CI** (no Mac, no display). They are ported
+carefully and structurally 1:1 with the original, but treat them as
+**unverified until run on a Mac**. The pure domain *is* verified — that is the
+whole point of the split. First Mac run: follow
+[`development.md`](development.md) §"Manual macOS checklist".
 
 ---
 

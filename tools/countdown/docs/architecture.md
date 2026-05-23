@@ -16,7 +16,7 @@ without re-reading every line.
 The refactor applies **Ports & Adapters** (a.k.a. Hexagonal / Clean
 Architecture). The goals, in priority order:
 
-1. **Testability** — the logic that decides *when to glow, when to wiggle, when
+1. **Testability** — the logic that decides *when to glow, when to blur, when
    to block* must run on a Linux CI box with no display, no Mac, no clock.
 2. **Portability** — the platform-specific 30% is quarantined behind interfaces
    so a Rust port replaces adapters, not logic.
@@ -43,8 +43,9 @@ Architecture). The goals, in priority order:
         ┌───────▼──────────────────────────────────▼───────┐
         │ PORTS    ports.py                                 │
         │   Clock, Logger, FrameScheduler, CountdownOverlay,│
-        │   StopOverlay, AppControl, WorkspaceTidy,          │
-        │   CalendarSource, InputSource                     │
+        │   StopOverlay, ScreenBlur, AppControl,            │
+        │   WorkspaceTidy, CalendarSource, InputSource,    │
+        │   SignalListener, UrlOpener, WifiSource, EnvSource│
         └───────────────────────┬───────────────────────────┘
                                 │ uses only domain types
                 ┌───────────────▼────────────────┐
@@ -91,18 +92,18 @@ C4Context
   title Countdown — System Context
 
   Person(user, "User", "Time-blind / ADHD worker running timed work sessions from a terminal")
-  System(countdown, "Countdown", "macOS screen-edge timer: stroke, edge glow, window wiggle, block-on-end")
+  System(countdown, "Countdown", "macOS screen-edge timer: stroke, edge glow, screen blur, block-on-end")
 
   System_Ext(calendar, "macOS Calendar", "EventKit — upcoming accepted events")
-  System_Ext(ax, "macOS Accessibility", "AX API — read/move frontmost window")
-  System_Ext(workspace, "NSWorkspace / System Events", "List, activate, hide, minimize, quit apps")
+  System_Ext(ax, "macOS Accessibility", "AX API — keyboard synthesis for block-end tidy")
+  System_Ext(workspace, "NSWorkspace", "List, activate, hide, minimize apps; open call URLs")
   System_Ext(screens, "AppKit display server", "NSScreen / NSWindow / NSRunLoop — borderless overlays")
 
   Rel(user, countdown, "Runs ./run 15 · ./run 6:00 · ./run watch; types quick timers; Ctrl+C")
   Rel(countdown, calendar, "Polls nearest accepted event; auto-starts / retargets")
-  Rel(countdown, ax, "Wiggles frontmost window in the final seconds")
-  Rel(countdown, workspace, "Block-on-end: minimize / hide / quit per .env rules")
-  Rel(countdown, screens, "Draws stroke + HUD + stop overlay on every display")
+  Rel(countdown, ax, "Block-on-end: Hide Others + Minimize via synthetic keys")
+  Rel(countdown, workspace, "App focus, activation policy, browser for call links")
+  Rel(countdown, screens, "Draws stroke + glow + blur + HUD + stop overlay on every display")
 ```
 
 ### Level 2 — Containers (refactored layout)
@@ -116,9 +117,9 @@ C4Container
   Container_Boundary(app, "Countdown") {
     Container(entry, "Entry + Composition", "cli.py / composition.py", "argparse; builds + injects adapters")
     Container(application, "Application", "app/", "SessionRunner, WatchRunner — orchestration")
-    Container(domain, "Domain", "domain/", "Pure: curves, timespec, session machine, block-end plan")
-    Container(ports, "Ports", "ports.py", "Interfaces: Clock, Overlay, Shaker, Calendar, …")
-    Container(mac, "macOS Adapters", "adapters/macos/", "PyObjC / EventKit / AX / AppleScript")
+    Container(domain, "Domain", "domain/", "Pure: curves, timespec, session machine")
+    Container(ports, "Ports", "ports.py", "Interfaces: Clock, Overlay, Blur, Calendar, …")
+    Container(mac, "macOS Adapters", "adapters/macos/", "PyObjC / EventKit / AX / CGEvent")
     Container(sys, "System Adapters", "adapters/system/", "Clock, stdin, signals, logger, dotenv")
   }
 
@@ -171,28 +172,35 @@ sequenceDiagram
   participant S as SessionRunner
   participant D as Session (domain)
   participant O as CountdownOverlay
-  participant W as WindowShaker
+  participant B as ScreenBlur
+  participant ST as StopOverlay
 
   U->>CLI: ./run 15
-  CLI->>C: build_session_runner(cfg, target)
+  CLI->>C: run_one_shot(cfg, target)
   C-->>CLI: SessionRunner (adapters injected)
   CLI->>S: run()
   S->>O: show()
+  S->>B: show()
   loop every frame (~60 Hz)
     S->>D: tick(clock.now())
-    D-->>S: RenderFrame{fraction,label,color,pulse,shake}
+    D-->>S: RenderFrame{fraction,label,color,pulse,blur}
     S->>O: render(frame)
-    S->>W: apply(frame.shake) or restore()
+    S->>B: set_intensity(frame.blur)
   end
   alt block_on_end
     S->>D: state -> BLOCKING
-    S->>O: hide(); show stop overlay
+    S->>O: hide()
+    S->>B: set_intensity(1.0)
+    S->>ST: show stop lines
     U->>S: dismiss
-    S->>S: execute block-end plan, then DONE
+    S->>S: workspace tidy, then DONE
+  else remote call off work Wi-Fi
+    S->>S: open URL, state -> DONE
   else
     S->>S: state -> DONE
   end
   S->>O: teardown
+  S->>B: teardown
 ```
 
 ### Watch mode (`./run watch`)
@@ -255,8 +263,8 @@ These are load-bearing. A change that violates one is a bug even if tests pass.
    no randomness inside `domain/`. Time enters only as a parameter. This is what
    makes the domain deterministically testable.
 3. **One Port per external concern**, and the Port is the *narrowest* surface
-   the app needs — not a passthrough of the SDK. `WindowShaker` exposes
-   `apply(offset)` / `restore()`, not `AXUIElementSetAttributeValue`.
+   the app needs — not a passthrough of the SDK. `ScreenBlur` exposes
+   `set_intensity(amount)`, not `NSVisualEffectView`.
 4. **Adapters are dumb.** An adapter translates a Port call into SDK calls and
    back. It contains no timer math, no policy, no `if session_kind == …`. If an
    adapter starts making decisions, that logic belongs in the domain.
@@ -267,7 +275,7 @@ These are load-bearing. A change that violates one is a bug even if tests pass.
    new field on `RenderFrame`, computed in the domain.
 7. **Whisker of feedback latency**: the frame loop must stay ~60 Hz. Domain
    `tick()` is O(1) and allocation-light. Heavy work (calendar queries,
-   AppleScript) is throttled and never on the per-frame path.
+   keyboard synthesis) is throttled and never on the per-frame path.
 8. **Retarget never shrinks `total_seconds`.** The stroke fraction and pulse
    curves are computed against the original total; a calendar snap that pulls
    the target *in* must not make the ring jump backwards. See
@@ -277,7 +285,7 @@ These are load-bearing. A change that violates one is a bug even if tests pass.
 
 ```
 tools/countdown/
-  run, shake                  # venv bootstrap scripts (unchanged UX)
+  run                         # venv bootstrap script
   pyproject.toml              # package metadata + console entry points
   requirements.txt            # PyObjC frameworks (macOS only)
   .env.example                # documented config template
@@ -289,13 +297,14 @@ tools/countdown/
     domain/
       math.py                 # smoothstep, lerp, format_duration, clamp
       config.py               # AppConfig value object + env/CLI merge (pure)
-      curves.py               # pulse_opacity, pulse_spread, shake_intensity
+      curves.py               # pulse_opacity, pulse_spread, blur_intensity
       colors.py               # RGB type, stroke_color_for_fraction
-      shake.py                # ShakeMotion — pure wiggle-offset generator
       timespec.py             # parse_target_time, parse_quick_input
       session.py              # SessionState, SessionKind, Session, RenderFrame
-      calendar.py             # CalendarEvent, calendar_block_target
-      manifest.py             # apps.manifest parse/format
+      calendar.py             # CalendarEvent, calendar_block_target, hard_stop
+      calendar_fields.py    # call URL / room parsing from EventKit text
+      apps.py                 # RunningApp, AppSelector, selector matching
+      manifest.py             # apps.manifest parse/format (debug `run apps` only)
     app/
       session_runner.py       # orchestrates one session
       watch_runner.py         # watch-mode loop
@@ -306,15 +315,18 @@ tools/countdown/
         dotenv.py             # dotenv parser (returns a mapping; no env mutation)
         stdin_source.py       # non-blocking line reader
         signals.py            # SIGINT handler
+        wifi.py               # SystemWifi (SSID for call-link policy)
       macos/
         runloop.py            # NSRunLoop pump (FrameScheduler)
         overlay.py            # CountdownOverlay: stroke + edge glow windows
         hud.py                # timer label + Finish button
+        blur.py               # ScreenBlur: progressive frosted-glass layer
         stop_overlay.py       # full-screen block-on-end modal
-        shaker.py             # AX frontmost-window shaker
         app_control.py        # NSWorkspace: frontmost, activate, list, policy
-        workspace_tidy.py       # WorkspaceTidy: keyboard Hide Others + Minimize
+        workspace_tidy.py     # WorkspaceTidy: keyboard Hide Others + Minimize
+        keyboard.py           # CGEvent shortcut helper (used by workspace_tidy)
         calendar.py           # EventKit CalendarSource
+        url_opener.py         # opens meeting URLs in default browser
   tests/                      # pytest — domain exhaustive, app via fakes
   docs/                       # this folder
 ```

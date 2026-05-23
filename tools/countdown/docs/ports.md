@@ -50,7 +50,7 @@ calls so output is testable and redirectable.
 | Method | Contract |
 |--------|----------|
 | `info(msg)` | Normal status (`Countdown → 14:00 …`). |
-| `warn(msg)` | Recoverable degradation (`Shake disabled: …`). |
+| `warn(msg)` | Recoverable degradation (`Calendar disabled: …`). |
 | `error(msg)` | A real failure the user must see. |
 
 **Failure** — none.
@@ -159,16 +159,13 @@ policy). Everything `NSWorkspace`-ish that is *not* block-end execution.
 | Method | Contract |
 |--------|----------|
 | `frontmost_pid() -> int \| None` | PID of the frontmost app; `None` if it is our own Python process (so we never "restore focus" to ourselves). |
-| `app_name_for_pid(pid) -> str \| None` | Localised name for a PID. |
+| `app_for_pid(pid) -> RunningApp \| None` | Structured app identity for a PID; `None` if not found. |
 | `activate_pid(pid) -> bool` | Bring that app to the front; `False` if it is gone. |
-| `running_app_names() -> list[str]` | Every *regular* GUI app (includes windowless ones). Feeds block-end pass 1. |
-| `foreground_app_names() -> list[str]` | Apps with a visible foreground presence. Feeds block-end pass 2. |
+| `running_apps() -> list[RunningApp]` | Every *regular* GUI app (includes windowless ones). Used by the debug `run apps` command. |
 | `set_activation_policy(policy)` | `accessory` (no Dock icon, used during a session) / `prohibited` (fully hidden, watcher idle) / `regular` (focusable, for the stop modal). |
 
 **Failure** — list methods return `[]` on error, never raise.
-**Adapter** — `macos/app_control.py` (`NSWorkspace`, `NSApp`, and
-`Quartz.CGWindowListCopyWindowInfo` for the foreground-window list — no
-Automation permission required).
+**Adapter** — `macos/app_control.py` (`NSWorkspace`, `NSApp`).
 
 ---
 

@@ -21,11 +21,9 @@ class MacWorkspaceTidy:
         self,
         logger: ports.Logger,
         scheduler: ports.FrameScheduler,
-        app_control: ports.AppControl,
     ) -> None:
         self._logger = logger
         self._scheduler = scheduler
-        self._app_control = app_control
         self._accessibility_warned = False
 
     def tidy_focused(self, *, skip: frozenset[AppSelector]) -> None:

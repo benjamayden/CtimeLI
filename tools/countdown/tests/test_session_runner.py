@@ -61,7 +61,6 @@ class Harness:
         self.app_control = FakeAppControl(
             frontmost=42,
             running=[_notes],
-            foreground=[_notes],
             apps_by_pid={42: _notes},
         )
         self.workspace_tidy = FakeWorkspaceTidy()
@@ -191,7 +190,7 @@ def test_cleanup_activates_prior_app_before_tidy():
     h = Harness(block_on_end=True, duration=2.0)
     _safari = RunningApp(bundle_id="com.apple.Safari", display_name="Safari")
     new_ctrl = FakeAppControl(
-        frontmost=77, running=[], foreground=[], apps_by_pid={77: _safari}
+        frontmost=77, running=[], apps_by_pid={77: _safari}
     )
     h.runner.app_control = new_ctrl
     h.runner.pump()
@@ -222,7 +221,6 @@ def test_skipped_app_regains_focus_after_cleanup():
     h.runner.app_control = FakeAppControl(
         frontmost=99,
         running=[_terminal],
-        foreground=[_terminal],
         apps_by_pid={99: _terminal},
     )
     h.runner.pump()
@@ -233,6 +231,9 @@ def test_skipped_app_regains_focus_after_cleanup():
     h.runner.pump()
     # Skip app is activated twice: once before tidy, once in _restore_focus.
     assert h.runner.app_control.activated_pids == [99, 99]
+    assert h.workspace_tidy.tidy_calls[-1] == frozenset(
+        {AppSelector(kind="display_name", value="Terminal")}
+    )
 
 
 def test_remote_call_opens_url_and_skips_stop_overlay():

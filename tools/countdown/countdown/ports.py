@@ -133,9 +133,6 @@ class AppControl(Protocol):
     def running_apps(self) -> list[RunningApp]:
         """Every regular GUI app, including windowless ones."""
 
-    def foreground_apps(self) -> list[RunningApp]:
-        """Apps with a visible foreground presence (background only = false)."""
-
     def set_activation_policy(self, policy: ActivationPolicy) -> None: ...
 
 

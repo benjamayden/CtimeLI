@@ -127,7 +127,8 @@ never minimized if it was the focused app.
 Requires **Accessibility** permission (System Settings → Privacy & Security →
 Accessibility) so synthetic key events can be posted.
 
-After tidying, focus returns to the launching terminal (or Finder).
+After tidying, focus returns to the host terminal when it is in the watch-mode
+`extra_skip` set (see edge-cases #35).
 
 **Acceptance**: dismiss is near-instant; other visible apps are hidden; the
 focused app is minimized into the Dock; terminal prints

@@ -20,8 +20,8 @@ That is the live state. This file is the durable context.
 ## What this project is
 
 A **macOS screen-edge countdown timer** for time-blind / ADHD work. It draws a
-shrinking stroke around every display, glows the edges as zero nears, wiggles
-the frontmost window in the final seconds, and can hard-block the screen at zero
+shrinking stroke around every display, glows the edges as zero nears, progressively
+blurs the desktop in the final stretch, and can hard-block the screen at zero
 and tidy your windows away. It also has a watch mode that auto-starts timers
 from your calendar.
 
@@ -50,11 +50,11 @@ A **Ports & Adapters** package. Dependencies point inward; the domain is pure.
 
 ```
 tools/countdown/countdown/
-  domain/       PURE logic — math, curves, colours, timespec, session, calendar, blockend.
+  domain/       PURE logic — math, curves, colours, timespec, session, calendar.
                 No I/O, no platform calls. 100% unit-tested. Port verbatim.
-  ports.py      Interfaces — one per external concern (Clock, Overlay, Shaker, …).
+  ports.py      Interfaces — one per external concern (Clock, Overlay, Blur, …).
   app/          Orchestration — SessionRunner, WatchRunner. Depends on domain + ports only.
-  adapters/     Concrete ports. macos/ (PyObjC/EventKit/AX/AppleScript), system/ (stdlib).
+  adapters/     Concrete ports. macos/ (PyObjC/EventKit/AX/CGEvent), system/ (stdlib).
   composition.py + cli.py   Wiring + argparse. The only place adapters are constructed.
 tools/countdown/tests/      pytest — domain exhaustive, app via fakes.
 tools/countdown/docs/       the blueprint above.
@@ -78,7 +78,6 @@ cd tools/countdown
 .venv/bin/pytest                       # must pass before commit (domain + app)
 ./run 15                               # macOS — 15-minute timer
 ./run watch                            # macOS — watch mode
-./shake --seconds 20                   # macOS — wiggle tuning harness
 
 # Guard gate — must print nothing:
 grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|ApplicationServices|adapters)' \
@@ -93,6 +92,53 @@ grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|Applicat
 - **macOS adapters**: ported but **not machine-verified** (no Mac on CI). See
   `docs/edge-cases.md` §"Unverified surface" and `docs/development.md`
   §"Manual macOS checklist" before trusting them.
+
+## Keep code and docs in lockstep
+
+Every session should treat **code + docs as one deliverable**. The blueprint in
+`tools/countdown/docs/` is the spec; implementation must match it. When they
+diverge, fix whichever side is wrong — do not leave stale diagrams, port
+contracts, or README copy describing removed behaviour (see the shake→blur
+pivot: docs that still mention wiggle or deleted modules are bugs).
+
+**When you touch code**, ask:
+- Does `features.md` / `domain.md` still describe this behaviour accurately?
+- Do C4 diagrams, sequence flows, and `ports.md` match the ports and adapters
+  that exist *today*?
+- Did you update `.env.example`, `configuration.md`, and the manual checklist
+  if config or macOS behaviour changed?
+- Is there dead code left behind (unused port methods, loaders nothing reads,
+  docstrings pointing at deleted files)? Delete or document it — do not ignore it.
+
+**When you review or refactor**, actively look for:
+- **Code smells** — duplicated logic, god objects, implicit boolean state,
+  lying signatures, dead config fields, swallowed errors. Full catalogue:
+  `docs/development.md` §"Code-smell catalogue" (each row links to
+  `edge-cases.md`).
+- **Optimisation opportunities** — only where they pay off: trim unused APIs,
+  share injected dependencies in `composition.py`, defer I/O off the frame loop,
+  tighten tests that should assert on fake recordings. Do **not** refactor for
+  elegance unless the user asked or the smell is blocking the task.
+- **SOLID + DRY** — run the checklist in `docs/development.md` §"Code review
+  checklist" before you consider work done. In short: one reason to change per
+  module; new session kinds are data not branches; ports stay narrow; domain/app
+  depend on interfaces only; no formula or helper copied twice.
+
+**Campfire rule:** leave the repo cleaner than you found it. If you notice doc
+drift, vestigial APIs, or a smell adjacent to your change, fix it in the same
+pass when the fix is small and clearly correct. If it is out of scope, say so
+explicitly — do not silently accumulate debt.
+
+Quick sanity pass after substantive edits:
+
+```sh
+cd tools/countdown
+.venv/bin/pytest -q
+grep -REn '^[[:space:]]*(import|from)[[:space:]].*(AppKit|objc|EventKit|ApplicationServices|adapters)' \
+     countdown/domain countdown/app
+# Optional: grep docs for deleted symbols (shake, shaker, blockend, BlockEndExecutor)
+rg -i 'shake\.py|shaker\.py|WindowShaker|blockend\.py' tools/countdown/docs || true
+```
 
 ## What to do if the user asks…
 

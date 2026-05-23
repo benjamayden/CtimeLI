@@ -12,6 +12,7 @@ from pathlib import Path
 
 import AppKit
 
+from countdown import ports
 from countdown.adapters.macos.app_control import MacAppControl
 from countdown.adapters.macos.workspace_tidy import MacWorkspaceTidy
 from countdown.adapters.macos.calendar import EventKitCalendar
@@ -30,16 +31,14 @@ from countdown.app.session_runner import SessionRunner
 from countdown.app.watch_runner import WatchRunner
 from countdown.domain.apps import AppSelector, RunningApp, sort_apps_for_manifest
 from countdown.domain.config import AppConfig
-from countdown.domain.manifest import format_manifest, parse_manifest
+from countdown.domain.manifest import format_manifest
 from countdown.domain.math import format_duration
 from countdown.domain.session import Session, SessionKind
 
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 _MANIFEST_PATH = Path(__file__).resolve().parent.parent / "apps.manifest"
 
-# Terminal apps — used for block-end extra_skip only.
-_HOST_TERMINALS = frozenset({"Terminal", "iTerm2", "iTerm", "Warp", "Cursor"})
-# Maps TERM_PROGRAM env values to the macOS app display name.
+# Terminal apps — maps TERM_PROGRAM env values to the macOS app display name.
 _TERM_PROGRAM_TO_APP = {
     "Apple_Terminal": "Terminal",
     "iTerm.app": "iTerm2",
@@ -51,11 +50,10 @@ _TERM_PROGRAM_TO_APP = {
 def build_config(**cli_overrides: object) -> tuple[AppConfig, list[str]]:
     """Assemble AppConfig: defaults < .env < process env < CLI overrides.
 
-    Returns (config, warnings) where warnings are stale manifest index messages.
+    Returns (config, warnings).
     """
     env = DotEnvSource(_ENV_PATH).values()
-    manifest = _load_manifest()
-    cfg, warnings = AppConfig.from_mapping(env, manifest=manifest)
+    cfg, warnings = AppConfig.from_mapping(env)
     return cfg.merge(**cli_overrides), warnings
 
 
@@ -71,6 +69,7 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
         f"Countdown → {target:%H:%M:%S} ({format_duration(remaining)} remaining)"
     )
     logger.info("Ctrl+C to quit.")
+    app_control = MacAppControl()
     runner = _make_runner(
         config,
         started=clock.now(),
@@ -84,6 +83,7 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
         clock=clock,
         logger=logger,
         signals=signals,
+        app_control=app_control,
         extra_skip=frozenset(),
         url_opener=MacUrlOpener(),
         wifi=SystemWifi(),
@@ -110,6 +110,8 @@ def run_watch(config: AppConfig) -> int:
     signals = SigintListener()
     input_source = StdinSource()
     calendar = EventKitCalendar(logger)
+    app_control = MacAppControl()
+    scheduler = MacScheduler()
     hosts = _host_terminal_selectors()
 
     def factory(target, *, kind, event_start, event_id, event_title, call_url, room):
@@ -126,6 +128,8 @@ def run_watch(config: AppConfig) -> int:
             clock=clock,
             logger=logger,
             signals=signals,
+            app_control=app_control,
+            scheduler=scheduler,
             extra_skip=hosts,
             url_opener=MacUrlOpener(),
             wifi=SystemWifi(),
@@ -138,8 +142,8 @@ def run_watch(config: AppConfig) -> int:
         input_source=input_source,
         calendar=calendar,
         signals=signals,
-        scheduler=MacScheduler(),
-        app_control=MacAppControl(),
+        scheduler=scheduler,
+        app_control=app_control,
         session_factory=factory,
     )
     return watch.run()
@@ -176,15 +180,6 @@ def run_apps() -> int:
 # -- internals ---------------------------------------------------------------
 
 
-def _load_manifest() -> dict[int, str]:
-    if not _MANIFEST_PATH.exists():
-        return {}
-    try:
-        return parse_manifest(_MANIFEST_PATH.read_text())
-    except OSError:
-        return {}
-
-
 def _make_runner(
     config: AppConfig,
     *,
@@ -196,12 +191,14 @@ def _make_runner(
     event_title: str | None,
     call_url: str | None,
     room: str | None,
-    clock: SystemClock,
-    logger: StderrLogger,
-    signals: SigintListener,
+    clock: ports.Clock,
+    logger: ports.Logger,
+    signals: ports.SignalListener,
+    app_control: ports.AppControl,
+    scheduler: ports.FrameScheduler | None = None,
     extra_skip: frozenset[AppSelector],
-    url_opener: MacUrlOpener,
-    wifi: SystemWifi,
+    url_opener: ports.UrlOpener,
+    wifi: ports.WifiSource,
 ) -> SessionRunner:
     session = Session(
         started=started,
@@ -214,8 +211,8 @@ def _make_runner(
         call_url=call_url,
         room=room,
     )
-    app_control = MacAppControl()
-    scheduler = MacScheduler()
+    if scheduler is None:
+        scheduler = MacScheduler()
     return SessionRunner(
         session,
         clock=clock,
@@ -225,24 +222,12 @@ def _make_runner(
         stop_overlay=MacStopOverlay(),
         blur=MacScreenBlur(),
         app_control=app_control,
-        workspace_tidy=MacWorkspaceTidy(logger, scheduler, app_control),
+        workspace_tidy=MacWorkspaceTidy(logger, scheduler),
         signals=signals,
         extra_skip=extra_skip,
         url_opener=url_opener,
         wifi=wifi,
     )
-
-
-def _host_terminal_names() -> frozenset[str]:
-    """All known terminal names — kept for reference; block-end uses selectors."""
-    names = set(_HOST_TERMINALS)
-    term = os.environ.get("TERM_PROGRAM", "").strip()
-    if term:
-        names.add(term)
-        mapped = _TERM_PROGRAM_TO_APP.get(term)
-        if mapped:
-            names.add(mapped)
-    return frozenset(names)
 
 
 def _host_terminal_selectors() -> frozenset[AppSelector]:
