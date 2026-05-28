@@ -58,6 +58,15 @@ def test_finish_matches_zero_behaviour():
     assert blocking.state is SessionState.BLOCKING
 
 
+def test_abandon_for_sleep_skips_block_on_end():
+    session = make_session(block_on_end=True, duration=600.0)
+    session.start()
+    session.abandon_for_sleep()
+    assert session.state is SessionState.DONE
+    assert session.abandoned_for_sleep is True
+    assert session.blocked is False
+
+
 def test_retarget_grows_total_but_never_shrinks_it():
     session = make_session(duration=60.0)
     session.start()

@@ -162,6 +162,8 @@ def run_one_shot(config: AppConfig, target: dt.datetime) -> int:
 
     if session.interrupted:
         logger.info(tagged("STOP", "Timer stopped."))
+    elif session.abandoned_for_sleep:
+        logger.info(tagged("STOP", "Timer ended after sleep."))
     elif session.blocked:
         logger.info(tagged("STOP", "Time's up."))
     else:

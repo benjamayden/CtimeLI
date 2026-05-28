@@ -174,12 +174,15 @@ class WatchRunner:
         if (
             session.kind is SessionKind.CALENDAR
             and session.event_id
-            and session.blocked
+            and session.state is SessionState.DONE
             and not session.interrupted
         ):
             self._finished_events[session.event_id] = session.event_start or session.target
+        abandoned_sleep = session.abandoned_for_sleep
         self._current = None
         self._go_idle()
+        if abandoned_sleep:
+            self._start_from_nearest()
         if self.signals.interrupted():
             # Session consumed SIGINT for block-end tidy — do not quit watch.
             self.signals.clear()

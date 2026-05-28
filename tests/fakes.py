@@ -31,6 +31,10 @@ class FakeClock:
         self._now += dt.timedelta(seconds=seconds)
         self._mono += seconds
 
+    def advance_wall_only(self, seconds: float) -> None:
+        """Simulate system sleep — wall clock jumps, monotonic does not."""
+        self._now += dt.timedelta(seconds=seconds)
+
 
 class RecordingLogger:
     """Logger that keeps every message for assertions."""

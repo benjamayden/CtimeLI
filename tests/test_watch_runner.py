@@ -212,6 +212,37 @@ def test_completed_calendar_session_adds_to_finished_events():
     assert "evt-fin" in watch._finished_events
 
 
+def test_finish_early_marks_calendar_event_finished():
+    event = CalendarEvent(
+        event_id="evt-early", title="Standup", start=NOW + dt.timedelta(minutes=20)
+    )
+    watch, _ = make_watch(calendar_event=event, config=AppConfig(block_on_end=False))
+    assert watch._start_from_nearest() is True
+    runner = watch._current
+    runner.pump()
+    runner.overlay.finish = True
+    runner.pump()
+    watch._pump_current()
+    assert "evt-early" in watch._finished_events
+    assert watch._start_from_nearest() is False
+
+
+def test_sleep_abandon_marks_event_finished_and_goes_idle():
+    first = CalendarEvent(
+        event_id="evt-a", title="A", start=NOW + dt.timedelta(minutes=20)
+    )
+    watch, parts = make_watch(calendar_event=first)
+    assert watch._start_from_nearest() is True
+    runner = watch._current
+    runner.pump()
+    parts["clock"].advance_wall_only(60.0)
+    runner.pump()
+    watch._pump_current()
+    assert "evt-a" in watch._finished_events
+    assert watch._current is None
+    assert watch._start_from_nearest() is False
+
+
 def test_watch_survives_block_end_dismiss():
     watch, parts = make_watch(config=AppConfig(block_on_end=True))
     watch._try_start_manual(NOW + dt.timedelta(seconds=6))

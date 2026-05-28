@@ -12,8 +12,11 @@ import datetime as dt
 from ctimeli import ports
 from ctimeli.domain.apps import AppSelector, RunningApp, app_matches_selector
 from ctimeli.domain.calendar import is_work_wifi
+from ctimeli.domain.math import sleep_gap_seconds
 from ctimeli.domain.session import FRAME_INTERVAL, Session, SessionKind, SessionState
 from ctimeli.terminal_ui import ok, warn
+
+_SLEEP_GAP_THRESHOLD = 2.0
 
 _DISMISS_HINT = "Click anywhere to tidy windows · Return · or Ctrl+C"
 _DEFAULT_STOP_LINES = [
@@ -78,6 +81,7 @@ class SessionRunner:
         self._blocking_ui_shown = False
         self._interrupt_seen = False
         self._last_tick: dt.datetime | None = None
+        self._last_mono: float | None = None
         self._restore_focus_pid: int | None = None
         self._call_link_opened = False
         self._yield_loop = True
@@ -97,7 +101,7 @@ class SessionRunner:
             self._setup()
 
         now = self.clock.now()
-        dt_seconds = self._frame_dt(now)
+        mono = self.clock.monotonic()
 
         if self.signals.interrupted() and not self._interrupt_seen:
             self._interrupt_seen = True
@@ -105,7 +109,12 @@ class SessionRunner:
 
         state = self.session.state
         if state is SessionState.RUNNING:
-            self._run_frame(now, dt_seconds)
+            if self._sleep_gap_seconds(now, mono) > 0.0:
+                self.session.abandon_for_sleep()
+                self._maybe_open_call_link()
+            else:
+                dt_seconds = self._frame_dt(now, mono)
+                self._run_frame(now, dt_seconds)
 
         if self.session.state is SessionState.BLOCKING:
             self._ensure_blocking_ui()
@@ -137,17 +146,30 @@ class SessionRunner:
         self.overlay.show()
         self.blur.show()
         self._last_tick = self.clock.now()
+        self._last_mono = self.clock.monotonic()
 
-    def _frame_dt(self, now: dt.datetime) -> float:
-        """Wall-clock seconds since the last tick, floored at FRAME_INTERVAL.
+    def _sleep_gap_seconds(self, now: dt.datetime, mono: float) -> float:
+        if self._last_tick is None or self._last_mono is None:
+            return 0.0
+        wall_delta = (now - self._last_tick).total_seconds()
+        mono_delta = mono - self._last_mono
+        return sleep_gap_seconds(
+            wall_delta, mono_delta, threshold=_SLEEP_GAP_THRESHOLD
+        )
 
-        The floor stops a stalled run loop from yielding dt == 0, which would
-        freeze every lerp-based smoother (edge-cases #12).
+    def _frame_dt(self, now: dt.datetime, mono: float) -> float:
+        """Monotonic seconds since the last tick, floored at FRAME_INTERVAL.
+
+        Monotonic time pauses during system sleep, so smoothers do not burst on
+        wake. The floor stops a stalled run loop from yielding dt == 0 (edge-cases #12).
         """
-        if self._last_tick is None:
+        if self._last_tick is None or self._last_mono is None:
             self._last_tick = now
-        dt_seconds = max(FRAME_INTERVAL, (now - self._last_tick).total_seconds())
+            self._last_mono = mono
+            return FRAME_INTERVAL
+        dt_seconds = max(FRAME_INTERVAL, mono - self._last_mono)
         self._last_tick = now
+        self._last_mono = mono
         return dt_seconds
 
     def _on_work_wifi(self) -> bool:

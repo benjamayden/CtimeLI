@@ -34,6 +34,9 @@ class AppConfig:
     pulse_ramp_power: float = 1.0
     pulse_visual_power: float = 1.0
 
+    # Screen blur (independent window from edge glow)
+    blur_before_secs: float = 30.0
+
     # Block-on-end
     block_on_end: bool = False
 
@@ -73,6 +76,7 @@ class AppConfig:
             pulse_depth_max=_as_float(env, "PULSE_DEPTH_MAX", 110.0),
             pulse_ramp_power=_pulse_ramp_power(env),
             pulse_visual_power=_as_float(env, "PULSE_VISUAL_POWER", 1.0),
+            blur_before_secs=_as_float(env, "BLUR_BEFORE_SECS", 30.0),
             block_on_end=_as_bool(env, "BLOCK_ON_END", False),
             calendar_enabled=_as_bool(env, "CALENDAR_ENABLED", True),
             calendar_poll_seconds=_as_float(env, "CALENDAR_POLL_SECONDS", 15.0),

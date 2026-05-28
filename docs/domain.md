@@ -52,6 +52,10 @@ Examples: `3725 → "1h 2m 5s"`, `64 → "1m 4s"`, `9 → "9s"`, `-5 → "0s"`.
 ### `clamp(x, lo, hi) -> float`
 `max(lo, min(hi, x))`. Provided once; used pervasively.
 
+### `sleep_gap_seconds(wall_delta, mono_delta, threshold=2.0) -> float`
+Detect system sleep between frames. Returns `wall_delta - mono_delta` when that
+exceeds `threshold`, else `0`. Used by the runner to abandon sessions on wake.
+
 ---
 
 ## 2. Animation curves — `domain/curves.py`
@@ -93,12 +97,17 @@ return t ** cfg.pulse_ramp_power                  # 1 = linear, 3 = late/cubic
 maps spread `0..1` onto pixel depth `pulse_depth_min .. pulse_depth_max`.
 
 ### `blur_intensity(remaining, cfg) -> float`  →  range `0 .. 1`
-Full-screen blur strength. Shares the glow window and spread ramp.
+Full-screen blur strength. Uses its own window (`blur_before_secs`, default 30).
 ```
+window  = max(1, cfg.blur_before_secs)
+active  = 0 < remaining <= window
+elapsed = window - remaining
 if remaining <= 0: return 1
-return pulse_spread(remaining, cfg)
+if not active: return 0
+t = clamp(elapsed / window, 0, 1)
+return t ** cfg.pulse_ramp_power
 ```
-At the glow window edge → 0; at zero → 1. Shape follows `pulse_ramp_power`.
+At the blur window edge → 0; at zero → 1. Shape follows `pulse_ramp_power`.
 
 ### Deleted: `pulse_intensity`
 The original kept `pulse_intensity` as a "deprecated alias" that just called
@@ -298,6 +307,7 @@ The overlay renders a `RenderFrame` and asks the domain nothing. Adding a visual
 | `RUNNING` | `tick(now)` | `now >= target` ∧ (¬`block_on_end` ∨ remote-call skip) | `DONE` | remote-call skip: open URL off work Wi-Fi (runner) |
 | `RUNNING` | `finish()` | `block_on_end` | `BLOCKING` | as above |
 | `RUNNING` | `finish()` | ¬`block_on_end` | `DONE` | — |
+| `RUNNING` | `abandon_for_sleep()` | — | `DONE` | `abandoned_for_sleep = True`; never `BLOCKING` |
 | `RUNNING` | `retarget(t')` | `t' > now` | `RUNNING` | see §"Retarget" |
 | `RUNNING` | `interrupt()` | — | `INTERRUPTED` | — |
 | `BLOCKING` | `dismiss()` | — | `CLEANUP` | — |

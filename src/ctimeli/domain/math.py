@@ -44,6 +44,17 @@ def format_duration(seconds: float) -> str:
     return f"{secs}s"
 
 
+def sleep_gap_seconds(
+    wall_delta: float, mono_delta: float, *, threshold: float = 2.0
+) -> float:
+    """Seconds of wall time that did not advance monotonic time (system sleep).
+
+    Small deltas below ``threshold`` are ignored (frame jitter, NTP tweaks).
+    """
+    gap = wall_delta - mono_delta
+    return gap if gap > threshold else 0.0
+
+
 def format_duration_compact(seconds: float) -> str:
     """Compact clock-style duration for narrow UI (menu bar): ``1:04`` / ``1:01:01``."""
     total = max(0, int(seconds))

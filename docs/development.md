@@ -39,7 +39,7 @@ expected outputs.
 - `test_math.py` — `smoothstep` endpoints/midpoint; `lerp` frame-rate
   independence; `format_duration` across h/m/s and negatives.
 - `test_curves.py` — `pulse_opacity` (before/at/after window; ramp clamp),
-  `pulse_spread` (linear vs `ramp_power=3`), `blur_intensity` (glow window).
+  `pulse_spread` (linear vs `ramp_power=3`), `blur_intensity` (blur window).
 - `test_colors.py` — `stroke_color_for_fraction` above/at/below `red_zone`.
 - `test_timespec.py` — **every row of the parsing table in
   [`domain.md`](domain.md) §4**, including the ambiguous-hour and error cases.
@@ -72,7 +72,7 @@ to `adapters/macos/`:
 
 - [ ] `./run 1` — stroke draws on every display; shrinks; turns red near zero.
 - [ ] Edge glow blooms in the last ~2 min and deepens.
-- [ ] Screen blur ramps in the last ~2 min; desktop unreadable at zero.
+- [ ] Screen blur ramps in the last ~30 s; desktop unreadable at zero.
 - [ ] `./run 1 --block-on-end` — stop overlay covers all displays; ignores
       input for ~0.6 s; click/Return/Escape dismisses; windows tidy per `.env`.
 - [ ] `./run watch` — menu bar icon appears; **Start** `1` gets a timer;

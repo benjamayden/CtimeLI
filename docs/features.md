@@ -56,8 +56,8 @@ glow is visible and deepens monotonically toward zero.
 In the final stretch the desktop **blurs progressively** — a peripheral nudge
 that does not move windows or cause motion sickness.
 
-- Active for the last `pulse_before_secs` seconds (default `120`) — the same
-  window as the edge glow.
+- Active for the last `blur_before_secs` seconds (default `30`) — independent
+  of the edge-glow window.
 - Intensity ramps `0 → 1` across that window, shaped by `pulse_ramp_power`
   (`1` = linear, `3` = late/cubic) via `blur_intensity()` in [`domain.md`](domain.md).
 - Rendered as a full-screen frosted-glass layer **below** the stroke/glow and
@@ -66,7 +66,7 @@ that does not move windows or cause motion sickness.
   **persists** under the semi-transparent stop overlay and clears on dismiss.
 - Always click-through — never intercepts mouse events.
 
-**Acceptance**: with >120 s remaining there is no blur; inside the window blur
+**Acceptance**: with >30 s remaining there is no blur; inside the window blur
 deepens monotonically toward zero; at zero the desktop is unreadable; with
 `block_on_end` on the blurred desktop remains visible through the stop overlay
 until dismiss.
@@ -93,6 +93,23 @@ Ends the running session before its target.
   appears first (state → `BLOCKING`).
 
 **Acceptance**: Finish honours `block_on_end` identically to a natural zero.
+In watch mode, a completed calendar session (Finish, natural zero, or wake
+from sleep) marks the event consumed so it is not auto-started again.
+
+## 6a. Wake from sleep
+
+If the Mac sleeps while a session runs, the user was not in hyperfocus — the
+countdown must not resume on wake.
+
+- Detected by comparing wall-clock advance to monotonic advance between frames
+  (see [`ports.md`](ports.md) §`Clock`).
+- On wake: end the session as `DONE` **without** the block overlay, even when
+  `block_on_end` is on.
+- Calendar remote-call sessions still open the call link (same rules as zero).
+- Watch mode marks the calendar event finished and tries the next candidate.
+
+**Acceptance**: `./run 5 --block-on-end` → sleep → wake → no stop overlay, timer
+gone; watch calendar event is not re-triggered after sleep abandon.
 
 ## 7. Block-on-end (the stop overlay)
 

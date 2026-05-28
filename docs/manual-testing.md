@@ -52,16 +52,33 @@ Open a second terminal tab to watch for errors:
 **In a real countdown:**
 
 ```sh
-./run 2 --block-on-end    # short timer inside the default 120 s glow/blur window
+./run 2 --block-on-end    # blur window is 30 s; glow still starts at 120 s
 ```
 
 **Watch for:**
-- [ ] Desktop blurs progressively as time runs out (starts with the edge glow)
+- [ ] Edge glow may appear before blur (glow window is longer)
+- [ ] Desktop blur ramps only in the final ~30 s
 - [ ] Stroke/glow stay visible **above** the blur; HUD Finish stays clickable
 - [ ] At zero with `block_on_end`: blurred desktop shows through the stop overlay
 - [ ] Click dismiss clears blur and the block screen together
 
 Automated checklist: `./test_manual.sh blur`.
+
+---
+
+## 3a. Wake from sleep
+
+```sh
+./run 5 --block-on-end
+```
+
+Put the Mac to sleep for ~1 minute, then wake.
+
+**Watch for:**
+- [ ] Timer ends on wake — **no** stop overlay (sleep is not hyperfocus)
+- [ ] Terminal reports the session ended after sleep
+- [ ] In watch mode with a calendar event: event is not re-triggered; call link
+      opens if applicable
 
 ---
 

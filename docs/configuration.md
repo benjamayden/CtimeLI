@@ -52,10 +52,13 @@ an error, not a silent drop ([`edge-cases.md`](edge-cases.md) #6).
 
 ## Screen blur
 
-Blur timing and ramp shape share the **edge glow** settings above — no separate
-env keys. `domain/curves.py::blur_intensity()` mirrors `pulse_spread()` over
-`pulse_before_secs`, reaching full strength at zero. Use `PULSE_RAMP=late` for
-a blur that intensifies mostly toward the end.
+| Field | Env key | Default | Meaning |
+|-------|---------|---------|---------|
+| `blur_before_secs` | `BLUR_BEFORE_SECS` | `30.0` | Length of the blur window before zero, s. |
+
+Ramp shape follows `pulse_ramp_power` / `PULSE_RAMP` — same exponent as the glow
+spread curve. `domain/curves.py::blur_intensity()` is independent of
+`pulse_before_secs`; edge glow and blur can use different windows.
 
 ## Block-on-end
 

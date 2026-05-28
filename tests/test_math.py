@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from ctimeli.domain.math import clamp, format_duration, lerp, smoothstep
+from ctimeli.domain.math import clamp, format_duration, lerp, sleep_gap_seconds, smoothstep
 
 
 def test_clamp_bounds():
@@ -61,3 +61,11 @@ def test_lerp_zero_dt_is_a_no_op():
 )
 def test_format_duration(seconds, expected):
     assert format_duration(seconds) == expected
+
+
+def test_sleep_gap_seconds_ignores_small_drift():
+    assert sleep_gap_seconds(1.0, 0.9, threshold=2.0) == 0.0
+
+
+def test_sleep_gap_seconds_detects_wake_jump():
+    assert sleep_gap_seconds(3600.0, 0.016, threshold=2.0) == pytest.approx(3599.984)

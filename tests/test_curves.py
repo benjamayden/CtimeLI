@@ -42,12 +42,21 @@ def test_pulse_spread_ramp_power_is_applied():
 
 def test_blur_intensity_zero_outside_window():
     assert blur_intensity(200.0, CFG) == 0.0
-    assert blur_intensity(120.0, CFG) == pytest.approx(0.0)
+    assert blur_intensity(60.0, CFG) == 0.0  # outside default 30 s blur window
+    assert blur_intensity(31.0, CFG) == 0.0
 
 
 def test_blur_intensity_full_at_zero():
     assert blur_intensity(0.0, CFG) == 1.0
 
 
-def test_blur_intensity_tracks_pulse_spread():
-    assert blur_intensity(60.0, CFG) == pulse_spread(60.0, CFG)
+def test_blur_uses_separate_window_from_glow():
+    assert pulse_spread(60.0, CFG) > 0.0
+    assert blur_intensity(60.0, CFG) == 0.0
+    assert blur_intensity(15.0, CFG) > 0.0
+
+
+def test_blur_intensity_ramp_power():
+    late = AppConfig(blur_before_secs=30.0, pulse_ramp_power=3.0)
+    # elapsed 15 s of a 30 s window -> t = 0.5 -> 0.125.
+    assert blur_intensity(15.0, late) == pytest.approx(0.125)

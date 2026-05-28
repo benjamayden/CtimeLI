@@ -130,6 +130,30 @@ def test_finish_button_ends_the_session():
     assert h.session.state is SessionState.DONE
 
 
+def test_sleep_gap_abandons_session_without_block():
+    h = Harness(block_on_end=True, duration=3600.0)
+    h.runner.pump()
+    h.clock.advance_wall_only(3600.0)
+    assert h.runner.pump() is False
+    assert h.session.state is SessionState.DONE
+    assert h.session.abandoned_for_sleep is True
+    assert h.session.blocked is False
+    assert h.stop_overlay.shown_lines is None
+
+
+def test_sleep_abandon_opens_remote_call_link():
+    h = Harness(
+        block_on_end=True,
+        duration=3600.0,
+        kind=SessionKind.CALENDAR,
+        call_url="https://zoom.us/j/123",
+    )
+    h.runner.pump()
+    h.clock.advance_wall_only(60.0)
+    assert h.runner.pump() is False
+    assert h.url_opener.opened == ["https://zoom.us/j/123"]
+
+
 def test_interrupt_ends_the_session():
     h = Harness(block_on_end=False, duration=60.0)
     h.runner.pump()

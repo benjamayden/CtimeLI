@@ -476,3 +476,19 @@ Two causes:
 CLI entry; detached watch spawns the same path. Watch launch from an embedded
 terminal hands off to Terminal.app (like ``./run permissions``). The setup
 marker is written only when all requested permissions succeed.
+
+---
+
+### #48 — Sleep wake must end the session · Fixed
+
+Wall clock jumps on wake while monotonic time does not (see [`ports.md`](ports.md)
+§`Clock`). A running countdown could expire instantly or show a stale ring after
+opening the lid — the user was not in hyperfocus while asleep.
+
+**Fix**: ``SessionRunner`` compares wall vs monotonic delta each frame; a gap
+> ~2 s calls ``Session.abandon_for_sleep()`` → ``DONE`` without block-on-end.
+Calendar call links still open; watch marks the event finished and tries the
+next candidate. Frame smoothers use monotonic ``dt``.
+
+**Related**: calendar Finish early did not add to ``_finished_events`` unless
+``blocked`` — fixed so any normal ``DONE`` calendar completion dedupes the event.

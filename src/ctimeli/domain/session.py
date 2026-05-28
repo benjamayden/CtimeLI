@@ -97,6 +97,8 @@ class Session:
         self.interrupted = False
         # True once the session has entered the block-on-end path.
         self.blocked = False
+        # True when wake-from-sleep ended the session without block-on-end.
+        self.abandoned_for_sleep = False
         self._display_fraction = 1.0
         self._pulse_phase = 0.0
 
@@ -166,6 +168,13 @@ class Session:
         """Finish early (HUD button). RUNNING -> BLOCKING or DONE."""
         if self.state is SessionState.RUNNING:
             self._end(on_work_wifi=on_work_wifi)
+
+    def abandon_for_sleep(self) -> None:
+        """RUNNING -> DONE. Sleep means the user left hyperfocus — no block overlay."""
+        if self.state is not SessionState.RUNNING:
+            return
+        self.abandoned_for_sleep = True
+        self.state = SessionState.DONE
 
     def retarget(
         self,

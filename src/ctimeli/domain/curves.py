@@ -46,12 +46,24 @@ def pulse_spread(remaining: float, cfg: AppConfig) -> float:
     return t**cfg.pulse_ramp_power
 
 
-def blur_intensity(remaining: float, cfg: AppConfig) -> float:
-    """Full-screen blur strength, 0 .. 1, over the pulse (glow) window.
+def _blur_window_elapsed(remaining: float, cfg: AppConfig) -> float | None:
+    """Seconds since the blur window opened, or None if outside the window."""
+    window = max(1.0, cfg.blur_before_secs)
+    if remaining <= 0.0 or remaining > window:
+        return None
+    return window - remaining
 
-    Shares the glow window and spread ramp shape — blur starts when the edge
-    glow opens and reaches 1.0 at zero.
+
+def blur_intensity(remaining: float, cfg: AppConfig) -> float:
+    """Full-screen blur strength, 0 .. 1, over ``blur_before_secs``.
+
+    Uses the same spread ramp shape as the edge glow (``pulse_ramp_power``).
     """
     if remaining <= 0.0:
         return 1.0
-    return pulse_spread(remaining, cfg)
+    elapsed = _blur_window_elapsed(remaining, cfg)
+    if elapsed is None:
+        return 0.0
+    window = max(1.0, cfg.blur_before_secs)
+    t = clamp(elapsed / window, 0.0, 1.0)
+    return t**cfg.pulse_ramp_power

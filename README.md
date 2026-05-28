@@ -13,7 +13,7 @@ For people who lose track of time mid-task: 10 minutes before a meeting becomes 
 ## Features
 
 - Shrinking stroke around every display (click-through, all monitors)
-- Edge glow + progressive blur in the final stretch (default: last 120s)
+- Edge glow + progressive blur in the final stretch (default: glow 120s, blur 30s)
 - HUD with remaining time + Finish button
 - Block-on-end: full-screen stop overlay, then hide other apps + minimize focused window
 - Watch mode: menu bar Start/Add/Quit; calendar auto-start before events; runs in background after launch
