@@ -35,6 +35,7 @@ from ctimeli.domain.config import AppConfig
 from ctimeli.domain.manifest import format_manifest
 from ctimeli.domain.math import format_duration
 from ctimeli.domain.session import Session, SessionKind
+from ctimeli.terminal_ui import indent, tagged
 
 
 def request_watch_launch_permissions(

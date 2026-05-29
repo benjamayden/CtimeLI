@@ -2,9 +2,50 @@
 # Bootstrap the venv on first use, then run the CtimeLI CLI.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
-  python3 -m venv "$ROOT/.venv"
-  "$ROOT/.venv/bin/pip" install -q -r "$ROOT/requirements.txt"
+VENV="$ROOT/.venv"
+MIN_PY_MAJOR=3
+MIN_PY_MINOR=11
+
+pick_python() {
+  local cands=("python3.12" "python3.11" "/opt/homebrew/bin/python3" "/usr/local/bin/python3" "python3")
+  local py v maj min
+  for py in "${cands[@]}"; do
+    if ! command -v "$py" >/dev/null 2>&1; then
+      continue
+    fi
+    v="$("$py" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+    maj="${v%%.*}"
+    min="${v##*.}"
+    if (( maj > MIN_PY_MAJOR || (maj == MIN_PY_MAJOR && min >= MIN_PY_MINOR) )); then
+      echo "$py"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_venv_python_compatible() {
+  local v maj min
+  v="$("$VENV/bin/python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+  maj="${v%%.*}"
+  min="${v##*.}"
+  if ! (( maj > MIN_PY_MAJOR || (maj == MIN_PY_MAJOR && min >= MIN_PY_MINOR) )); then
+    echo "Existing .venv uses Python $v, but CtimeLI requires >= ${MIN_PY_MAJOR}.${MIN_PY_MINOR}." >&2
+    echo "Recreate it: rm -rf \"$VENV\"" >&2
+    exit 1
+  fi
+}
+
+if [[ ! -x "$VENV/bin/python" ]]; then
+  PY_BIN="$(pick_python)" || {
+    echo "Python ${MIN_PY_MAJOR}.${MIN_PY_MINOR}+ is required." >&2
+    exit 1
+  }
+  "$PY_BIN" -m venv "$VENV"
+  "$VENV/bin/python" -m pip install -q --upgrade pip setuptools wheel
+  "$VENV/bin/python" -m pip install -q -r "$ROOT/requirements.txt"
+else
+  ensure_venv_python_compatible
 fi
 cd "$ROOT"
-exec "$ROOT/.venv/bin/python" -m ctimeli "$@"
+exec "$VENV/bin/python" -m ctimeli "$@"

@@ -1,0 +1,8 @@
+flowchart TD
+  A[Calendar session running] --> B{Session ended}
+  B -->|No| C[Keep session active]
+  B -->|Yes| D{Completed calendar event}
+  D -->|Yes| E[Record finished event id]
+  D -->|No| F[Skip dedupe]
+  E --> G[Clear current session and go idle]
+  F --> G

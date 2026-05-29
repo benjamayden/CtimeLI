@@ -239,6 +239,22 @@ def test_sleep_abandon_marks_event_finished_and_goes_idle():
     runner.pump()
     watch._pump_current()
     assert "evt-a" in watch._finished_events
+
+
+def test_completed_calendar_session_without_block_does_not_restart():
+    event = CalendarEvent(
+        event_id="evt-done", title="Meeting", start=NOW + dt.timedelta(minutes=20)
+    )
+    watch, _ = make_watch(calendar_event=event)
+    assert watch._start_from_nearest() is True
+
+    runner = watch._current
+    runner.pump()                          # setup + first frame
+    watch.clock.advance(3600.0)
+    runner.pump()                          # tick -> DONE
+
+    watch._pump_current()                  # watch records completion and clears current
+    assert "evt-done" in watch._finished_events
     assert watch._current is None
     assert watch._start_from_nearest() is False
 

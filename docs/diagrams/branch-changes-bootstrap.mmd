@@ -1,0 +1,9 @@
+flowchart TD
+  A[Start install or run bootstrap] --> B{Existing venv present}
+  B -->|No| C[Pick Python 3.11 or newer]
+  C --> D[Create .venv]
+  D --> E[Upgrade pip setuptools wheel]
+  E --> F[Install requirements]
+  B -->|Yes| G{Venv Python compatible}
+  G -->|No| H[Stop and ask to recreate venv]
+  G -->|Yes| F

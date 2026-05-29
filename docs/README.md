@@ -41,6 +41,7 @@ monolith this refactor replaced.
 | 6 | [`edge-cases.md`](edge-cases.md) | See the bugs we found, how they were fixed, and the traps still lurking. |
 | 7 | [`development.md`](development.md) | Test, review, or extend the code — testing strategy, review checklist, smell catalogue. |
 | 8 | [`porting.md`](porting.md) | Rebuild this in another framework — Rust + Tauri port map and what is / isn't portable. |
+| 9 | [`branch-changes-fixes.md`](branch-changes-fixes.md) | Branch-specific change log for `fixes`: what changed, why, diagrams, and added tests. |
 
 ## Status
 
