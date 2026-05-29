@@ -60,17 +60,18 @@ exceeds `threshold`, else `0`. Used by the runner to abandon sessions on wake.
 
 ## 2. Animation curves — `domain/curves.py`
 
-All three take `remaining` (seconds left) and `cfg`, and return a number the
-overlay renders directly. They are independent — opacity, spread, and blur do
-not reference each other.
+All three take `fraction_remaining` (0..1, where 1.0 means the countdown just
+started and 0.0 means zero) and `cfg`, and return a number the overlay renders
+directly. They are independent — opacity, spread, and blur do not reference
+each other.
 
 ### The pulse window
 
 The "pulse" (edge glow) is active only near the end:
 ```
-window  = max(1, cfg.pulse_before_secs)          # default 120
-active  = 0 < remaining <= window
-elapsed = window - remaining                     # time since the window opened
+window  = clamp(cfg.pulse_before_fraction, 0, 1)               # default 0.1333...
+active  = 0 < fraction_remaining <= window
+elapsed = window - fraction_remaining                          # fraction since window opened
 ```
 If `not active`, both pulse curves return `0`.
 
@@ -78,7 +79,7 @@ If `not active`, both pulse curves return `0`.
 How bright the glow is. Ramps in fast, then holds.
 ```
 if not active: return 0
-ramp = max(0.5, cfg.pulse_opacity_ramp_secs)     # default 10
+ramp = min(window, max(0.001, cfg.pulse_opacity_ramp_fraction))
 u    = min(1, elapsed / ramp)
 return cfg.pulse_max_opacity * smoothstep(u)
 ```
@@ -97,12 +98,12 @@ return t ** cfg.pulse_ramp_power                  # 1 = linear, 3 = late/cubic
 maps spread `0..1` onto pixel depth `pulse_depth_min .. pulse_depth_max`.
 
 ### `blur_intensity(remaining, cfg) -> float`  →  range `0 .. 1`
-Full-screen blur strength. Uses its own window (`blur_before_secs`, default 30).
+Full-screen blur strength. Uses its own window (`blur_before_fraction`, default 0.0333...).
 ```
-window  = max(1, cfg.blur_before_secs)
-active  = 0 < remaining <= window
-elapsed = window - remaining
-if remaining <= 0: return 1
+window  = clamp(cfg.blur_before_fraction, 0, 1)
+active  = 0 < fraction_remaining <= window
+elapsed = window - fraction_remaining
+if fraction_remaining <= 0: return 1
 if not active: return 0
 t = clamp(elapsed / window, 0, 1)
 return t ** cfg.pulse_ramp_power

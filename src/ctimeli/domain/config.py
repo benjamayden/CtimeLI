@@ -26,8 +26,8 @@ class AppConfig:
     red_zone_fraction: float = 0.05
 
     # Edge glow (pulse)
-    pulse_before_secs: float = 120.0
-    pulse_opacity_ramp_secs: float = 10.0
+    pulse_before_fraction: float = 0.13333333333333333
+    pulse_opacity_ramp_fraction: float = 0.011111111111111112
     pulse_max_opacity: float = 0.85
     pulse_depth_min: float = 10.0
     pulse_depth_max: float = 110.0
@@ -35,7 +35,7 @@ class AppConfig:
     pulse_visual_power: float = 1.0
 
     # Screen blur (independent window from edge glow)
-    blur_before_secs: float = 30.0
+    blur_before_fraction: float = 0.03333333333333333
 
     # Block-on-end
     block_on_end: bool = False
@@ -69,14 +69,23 @@ class AppConfig:
         cfg = cls(
             stroke_width=_as_float(env, "STROKE_WIDTH", 6.0),
             red_zone_fraction=_as_float(env, "RED_ZONE_FRACTION", 0.05),
-            pulse_before_secs=_as_float(env, "PULSE_BEFORE_SECS", 120.0),
-            pulse_opacity_ramp_secs=_as_float(env, "PULSE_OPACITY_RAMP_SECS", 10.0),
+            pulse_before_fraction=_as_float_alias(
+                env, "PULSE_BEFORE_FRACTION", "PULSE_BEFORE_SECS", 0.13333333333333333
+            ),
+            pulse_opacity_ramp_fraction=_as_float_alias(
+                env,
+                "PULSE_OPACITY_RAMP_FRACTION",
+                "PULSE_OPACITY_RAMP_SECS",
+                0.011111111111111112,
+            ),
             pulse_max_opacity=_as_float(env, "PULSE_MAX_OPACITY", 0.85),
             pulse_depth_min=_as_float(env, "PULSE_DEPTH_MIN", 10.0),
             pulse_depth_max=_as_float(env, "PULSE_DEPTH_MAX", 110.0),
             pulse_ramp_power=_pulse_ramp_power(env),
             pulse_visual_power=_as_float(env, "PULSE_VISUAL_POWER", 1.0),
-            blur_before_secs=_as_float(env, "BLUR_BEFORE_SECS", 30.0),
+            blur_before_fraction=_as_float_alias(
+                env, "BLUR_BEFORE_FRACTION", "BLUR_BEFORE_SECS", 0.03333333333333333
+            ),
             block_on_end=_as_bool(env, "BLOCK_ON_END", False),
             calendar_enabled=_as_bool(env, "CALENDAR_ENABLED", True),
             calendar_poll_seconds=_as_float(env, "CALENDAR_POLL_SECONDS", 15.0),
@@ -112,6 +121,15 @@ class AppConfig:
 
 def _as_float(env: Mapping[str, str], key: str, default: float) -> float:
     raw = env.get(key)
+    return default if raw is None else float(raw)
+
+
+def _as_float_alias(
+    env: Mapping[str, str], primary_key: str, fallback_key: str, default: float
+) -> float:
+    raw = env.get(primary_key)
+    if raw is None:
+        raw = env.get(fallback_key)
     return default if raw is None else float(raw)
 
 

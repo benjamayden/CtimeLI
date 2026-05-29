@@ -155,10 +155,10 @@ class Session:
             color=stroke_color_for_fraction(
                 self._display_fraction, self.config.red_zone_fraction, self.base_color
             ),
-            pulse_opacity=pulse_opacity(remaining, self.config),
-            pulse_spread=pulse_spread(remaining, self.config),
+            pulse_opacity=pulse_opacity(target_fraction, self.config),
+            pulse_spread=pulse_spread(target_fraction, self.config),
             pulse_phase=self._pulse_phase,
-            blur=blur_intensity(remaining, self.config),
+            blur=blur_intensity(target_fraction, self.config),
         )
         if remaining <= 0.0:
             self._end(on_work_wifi=on_work_wifi)

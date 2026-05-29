@@ -39,10 +39,10 @@ fully red; between, it is a smooth blend.
 In the final stretch a soft glow blooms inward from the screen edges — a
 peripheral-vision nudge that does not demand focus.
 
-- Active for the last `pulse_before_secs` seconds (default `120`).
+- Active for the last `pulse_before_fraction` of the countdown (default `0.13333333333333333`).
 - Two independent curves (full formulas in [`domain.md`](domain.md)):
   - **Opacity** ramps `0 → pulse_max_opacity` over the first
-    `pulse_opacity_ramp_secs` (default `10`) of the window — it appears quickly.
+    `pulse_opacity_ramp_fraction` (default `0.011111111111111112`) of the window — it appears quickly.
   - **Spread** (how deep the glow reaches inward) grows across the *whole*
     window, shaped by `pulse_ramp_power` (`1` = linear, `3` = late/cubic).
 - Rendered as stacked translucent fills, not a real gradient — see
@@ -56,7 +56,7 @@ glow is visible and deepens monotonically toward zero.
 In the final stretch the desktop **blurs progressively** — a peripheral nudge
 that does not move windows or cause motion sickness.
 
-- Active for the last `blur_before_secs` seconds (default `30`) — independent
+- Active for the last `blur_before_fraction` of the countdown (default `0.03333333333333333`) — independent
   of the edge-glow window.
 - Intensity ramps `0 → 1` across that window, shaped by `pulse_ramp_power`
   (`1` = linear, `3` = late/cubic) via `blur_intensity()` in [`domain.md`](domain.md).

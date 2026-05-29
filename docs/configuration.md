@@ -37,8 +37,8 @@ an error, not a silent drop ([`edge-cases.md`](edge-cases.md) #6).
 
 | Field | Env key | Default | Meaning |
 |-------|---------|---------|---------|
-| `pulse_before_secs` | `PULSE_BEFORE_SECS` | `120.0` | Length of the glow window before zero, s. |
-| `pulse_opacity_ramp_secs` | `PULSE_OPACITY_RAMP_SECS` | `10.0` | Seconds to reach `pulse_max_opacity` after the window opens. |
+| `pulse_before_fraction` | `PULSE_BEFORE_FRACTION` | `0.13333333333333333` | Fraction-remaining where the glow window opens. `PULSE_BEFORE_SECS` is accepted as a compatibility alias. |
+| `pulse_opacity_ramp_fraction` | `PULSE_OPACITY_RAMP_FRACTION` | `0.011111111111111112` | Fraction-remaining over which `pulse_max_opacity` is reached. `PULSE_OPACITY_RAMP_SECS` is accepted as a compatibility alias. |
 | `pulse_max_opacity` | `PULSE_MAX_OPACITY` | `0.85` | Peak glow alpha, `0..1`. |
 | `pulse_depth_min` | `PULSE_DEPTH_MIN` | `10.0` | Glow depth in px at window start (`spread = 0`). |
 | `pulse_depth_max` | `PULSE_DEPTH_MAX` | `110.0` | Glow depth in px at zero (`spread = 1`). |
@@ -54,11 +54,11 @@ an error, not a silent drop ([`edge-cases.md`](edge-cases.md) #6).
 
 | Field | Env key | Default | Meaning |
 |-------|---------|---------|---------|
-| `blur_before_secs` | `BLUR_BEFORE_SECS` | `30.0` | Length of the blur window before zero, s. |
+| `blur_before_fraction` | `BLUR_BEFORE_FRACTION` | `0.03333333333333333` | Fraction-remaining where the blur window opens. `BLUR_BEFORE_SECS` is accepted as a compatibility alias. |
 
 Ramp shape follows `pulse_ramp_power` / `PULSE_RAMP` — same exponent as the glow
 spread curve. `domain/curves.py::blur_intensity()` is independent of
-`pulse_before_secs`; edge glow and blur can use different windows.
+`pulse_before_fraction`; edge glow and blur can use different windows.
 
 ## Block-on-end
 
@@ -108,10 +108,10 @@ minimized if it was the focused app.
 ### Common to one-shot and watch
 
 Every flag defaults to `None` (= "do not override"). Type is `float` unless
-noted.
+noted. The `--*-secs` names remain accepted as hidden compatibility aliases.
 
 ```
---stroke-width            --pulse-before-secs SEC      --pulse-opacity-ramp-secs SEC
+--stroke-width            --pulse-before-fraction F    --pulse-opacity-ramp-fraction F
 --pulse-max-opacity 0-1   --pulse-depth-min PX         --pulse-depth-max PX
 --pulse-ramp {linear,late}                             --pulse-ramp-power N
 --pulse-visual-power N    --red-zone-fraction 0-1

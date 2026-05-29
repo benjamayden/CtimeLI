@@ -146,8 +146,8 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("config (.env defaults, CLI overrides)")
     for flag in (
         "--stroke-width",
-        "--pulse-before-secs",
-        "--pulse-opacity-ramp-secs",
+        "--pulse-before-fraction",
+        "--pulse-opacity-ramp-fraction",
         "--pulse-max-opacity",
         "--pulse-depth-min",
         "--pulse-depth-max",
@@ -155,6 +155,20 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
         "--red-zone-fraction",
     ):
         group.add_argument(flag, type=float, default=None)
+    group.add_argument(
+        "--pulse-before-secs",
+        dest="pulse_before_fraction",
+        type=float,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    group.add_argument(
+        "--pulse-opacity-ramp-secs",
+        dest="pulse_opacity_ramp_fraction",
+        type=float,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     group.add_argument(
         "--pulse-ramp", choices=["linear", "late"], default=None,
         help="Pulse spread preset",
@@ -175,8 +189,8 @@ def _config_overrides(args: argparse.Namespace) -> dict[str, object]:
     """Map CLI args to AppConfig field names. None values are ignored by merge()."""
     return {
         "stroke_width": args.stroke_width,
-        "pulse_before_secs": args.pulse_before_secs,
-        "pulse_opacity_ramp_secs": args.pulse_opacity_ramp_secs,
+        "pulse_before_fraction": args.pulse_before_fraction,
+        "pulse_opacity_ramp_fraction": args.pulse_opacity_ramp_fraction,
         "pulse_max_opacity": args.pulse_max_opacity,
         "pulse_depth_min": args.pulse_depth_min,
         "pulse_depth_max": args.pulse_depth_max,
